@@ -16,6 +16,10 @@ from waveshare_catalog.fetcher import Cache, Fetcher, FetchError, HttpxClient
 DEFAULT_DB = Path("waveshare.db")
 DEFAULT_CACHE = Path("cache")
 
+# A category should never need this many pages; the guard stops a broken pager
+# from looping forever during an unattended crawl.
+MAX_PAGES = 200
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -34,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     detail = sub.add_parser("detail", help="fetch full product pages")
     detail.add_argument("--url", action="append", default=[], help="product URL, repeatable")
     detail.add_argument("--name", help="instead of --url, take every product matching this name")
+    detail.add_argument(
+        "--all", action="store_true", help="every product whose page has not been fetched yet"
+    )
     detail.add_argument("--limit", type=int, help="cap how many products are fetched")
     detail.add_argument("--delay", type=float, help="seconds between requests")
 
@@ -105,8 +112,7 @@ def _read_category(
 ) -> int:
     """Walk a category's pages until the pager stops offering a next one."""
     found = 0
-    page_number = 1
-    while True:
+    for page_number in range(1, MAX_PAGES + 1):
         try:
             page = fetcher.get(listing.page_url(category, page_number))
         except FetchError as error:
@@ -115,8 +121,8 @@ def _read_category(
         products = listing.parse(page.text)
         found += store.save_products(connection, products, category_url=category)
         if not products or not listing.has_next_page(page.text):
-            return found
-        page_number += 1
+            break
+    return found
 
 
 def run_detail(
@@ -128,16 +134,28 @@ def run_detail(
     """Fetch and store the full page for each product URL."""
     failures = 0
     for position, url in enumerate(urls, start=1):
+        progress = f"[{position}/{len(urls)}{_eta(fetcher, len(urls) - position)}]"
         try:
             page = fetcher.get(url)
         except FetchError as error:
-            print(f"  [{position}/{len(urls)}] {url}: {error}", file=out)
+            print(f"  {progress} {url}: {error}", file=out)
             failures += 1
             continue
         detail = product.parse(url, page.text)
         store.save_detail(connection, detail)
-        print(f"  [{position}/{len(urls)}] {url} -> {len(detail.variants)} variants", file=out)
+        print(f"  {progress} {url} -> {len(detail.variants)} variants", file=out)
     return 1 if failures else 0
+
+
+def _eta(fetcher: Fetcher, remaining: int) -> str:
+    """Rough time left, which matters when a run is measured in hours."""
+    delay = fetcher.delay
+    if delay is None or remaining <= 0:
+        return ""
+    seconds = int(delay * remaining)
+    hours, rest = divmod(seconds, 3600)
+    minutes = rest // 60
+    return f", ~{hours}h{minutes:02d}m left" if hours else f", ~{minutes}m left"
 
 
 def run_reparse(cache: Cache, connection: sqlite3.Connection, out: TextIO) -> int:
@@ -177,11 +195,13 @@ def _dispatch(args: argparse.Namespace) -> int:
             return run_sync(_fetcher(args, args.delay), connection, args.limit_categories, out)
         if args.command == "detail":
             urls = list(args.url)
-            if args.name:
-                criteria = query.Filter(name=args.name, limit=args.limit)
+            if args.name or args.all:
+                criteria = query.Filter(
+                    name=args.name, detailed=False if args.all else None, limit=args.limit
+                )
                 urls += [row["url"] for row in query.search(connection, criteria)]
             if not urls:
-                print("nothing to fetch: pass --url or --name", file=out)
+                print("nothing to fetch: pass --url, --name or --all", file=out)
                 return 1
             return run_detail(_fetcher(args, args.delay), connection, urls, out)
         if args.command == "query":

@@ -249,3 +249,58 @@ def test_a_closed_pipe_is_not_an_error(workspace: Path, monkeypatch: pytest.Monk
 
     assert run(workspace, "export") == 0
     assert redirected == [99]
+
+
+def test_detail_all_takes_every_product_without_a_page(workspace: Path) -> None:
+    run(workspace, "sync")
+
+    assert run(workspace, "detail", "--all") == 0
+    assert len(rows(workspace, "SELECT * FROM details")) == 1
+
+    # Second run has nothing left to do, which is what makes a long crawl resumable.
+    assert run(workspace, "detail", "--all") == 1
+
+
+def test_sync_stops_at_the_page_guard(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    endless = LISTING_HTML + '<div class="pages"><a class="next" href="#">Next</a></div>'
+
+    class Endless(FakeClient):
+        def get(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+            self.requested.append(url)
+            if url.endswith("robots.txt"):
+                return 200, "User-agent: *\nCrawl-delay: 60\n"
+            if url.endswith("sitemap.xml"):
+                return 200, SITEMAP_XML
+            return 200, endless
+
+    client = Endless()
+    monkeypatch.setattr(cli, "MAX_PAGES", 3)
+    monkeypatch.setattr(
+        cli, "_fetcher", lambda args, delay: Fetcher(client, Cache(workspace / "c4"), delay=0)
+    )
+
+    assert run(workspace, "sync") == 0
+    assert sum("limit=80" in url for url in client.requested) == 3
+
+
+def test_the_eta_is_shown_while_fetching_details(
+    workspace: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(
+        cli,
+        "_fetcher",
+        lambda args, delay: Fetcher(
+            FakeClient(PAGES),
+            Cache(workspace / "c5"),
+            delay=3600,
+            sleep=clock.sleep,
+            clock=clock.time,
+        ),
+    )
+
+    run(workspace, "detail", "--url", PRODUCT_URL, "--url", "https://www.waveshare.com/b.htm")
+
+    assert "1h00m left" in capsys.readouterr().out

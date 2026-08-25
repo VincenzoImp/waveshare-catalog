@@ -26,6 +26,9 @@ uv run waveshare-catalog query --name touch --price-max 40 --with-options
 # 3. pull full pages only for what survived the filter
 uv run waveshare-catalog detail --name "touch lcd" --limit 20
 
+# ...or take the whole catalogue, resuming wherever the last run stopped
+uv run waveshare-catalog detail --all
+
 # 4. take it elsewhere
 uv run waveshare-catalog export --format csv --price-max 60 > shortlist.csv
 ```
@@ -46,6 +49,21 @@ rather than 2,350.
 
 `--delay` overrides the interval. It is deliberately explicit, and going faster than a site
 asks for is your call, not the tool's default.
+
+### How long a full crawl takes
+
+Product pages are around 300 KB and the site answers in about 2.1 s, measured. For all 2,349
+products:
+
+| delay | full detail crawl |
+|---|---|
+| 60 s (what robots.txt asks) | ~40 h |
+| 5 s | ~4.6 h |
+| 2 s | ~2.7 h |
+| 1 s | ~2 h |
+
+`detail --all` only picks products whose page is missing, so a run can be interrupted and
+resumed, and an interrupted crawl loses nothing: pages already fetched stay in the cache.
 
 Every response is cached gzipped under `cache/`, keyed by URL, so re-running is free and a
 parser fix can be replayed with `reparse` without touching the network again.

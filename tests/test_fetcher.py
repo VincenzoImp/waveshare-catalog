@@ -76,13 +76,6 @@ def test_refuses_a_path_robots_disallows(tmp_path: Path) -> None:
         fetcher.get("https://www.waveshare.com/catalogsearch/result/index")
 
 
-def test_reports_a_non_200_response(tmp_path: Path) -> None:
-    fetcher, _, _ = build(tmp_path, {ROBOTS: (200, POLITE), PAGE: (503, "")})
-
-    with pytest.raises(FetchError, match="HTTP 503"):
-        fetcher.get(PAGE)
-
-
 def test_a_missing_robots_file_leaves_the_default_delay(tmp_path: Path) -> None:
     fetcher, _, _ = build(tmp_path, {ROBOTS: (404, ""), PAGE: (200, "a")})
 
@@ -134,3 +127,84 @@ def test_the_real_client_returns_status_and_body(monkeypatch: pytest.MonkeyPatch
 
     assert client.get(PAGE, {"User-Agent": USER_AGENT}) == (200, "body")
     client.close()
+
+
+def test_retries_a_transient_server_error(tmp_path: Path) -> None:
+    class Flaky:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+            if url.endswith("robots.txt"):
+                return 200, POLITE
+            self.calls += 1
+            return (503, "") if self.calls == 1 else (200, "recovered")
+
+    client = Flaky()
+    clock = FakeClock()
+    fetcher = Fetcher(client, Cache(tmp_path / "c"), delay=1, sleep=clock.sleep, clock=clock.time)
+
+    assert fetcher.get(PAGE).text == "recovered"
+    assert client.calls == 2
+
+
+def test_retries_a_dropped_connection(tmp_path: Path) -> None:
+    class Dropping:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+            if url.endswith("robots.txt"):
+                return 200, POLITE
+            self.calls += 1
+            if self.calls == 1:
+                raise FetchError("connection reset")
+            return 200, "recovered"
+
+    client = Dropping()
+    fetcher = Fetcher(client, Cache(tmp_path / "c"), delay=0)
+
+    assert fetcher.get(PAGE).text == "recovered"
+
+
+def test_gives_up_after_the_configured_attempts(tmp_path: Path) -> None:
+    fetcher, client, _ = build(tmp_path, {ROBOTS: (200, POLITE), PAGE: (503, "")}, delay=0)
+
+    with pytest.raises(FetchError, match="failed after 3 attempts: HTTP 503"):
+        fetcher.get(PAGE)
+
+    assert client.requested.count(PAGE) == 3
+
+
+def test_does_not_retry_a_permanent_error(tmp_path: Path) -> None:
+    fetcher, client, _ = build(tmp_path, {ROBOTS: (200, POLITE), PAGE: (404, "")}, delay=0)
+
+    with pytest.raises(FetchError, match="HTTP 404"):
+        fetcher.get(PAGE)
+
+    assert client.requested.count(PAGE) == 1
+
+
+def test_the_real_client_turns_transport_failures_into_fetch_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    from waveshare_catalog.fetcher import USER_AGENT, HttpxClient
+
+    client = HttpxClient()
+    monkeypatch.setattr(client, "_client", httpx.Client(transport=httpx.MockTransport(handler)))
+
+    with pytest.raises(FetchError, match="refused"):
+        client.get(PAGE, {"User-Agent": USER_AGENT})
+
+
+def test_the_cache_accepts_a_plain_string_path(tmp_path: Path) -> None:
+    cache = Cache(str(tmp_path / "cache"))
+
+    cache.write(PAGE, "one")
+
+    assert cache.read(PAGE) == "one"
