@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import replace
+from pathlib import Path
 
 from waveshare_catalog.store import (
     Detail,
     Product,
     Variant,
     counts,
-    known_product_urls,
+    open_db,
     save_categories,
     save_detail,
     save_products,
@@ -24,7 +25,6 @@ PRODUCT = Product(url=URL, name="A display", part_no="X-1", price_min=9.99, has_
 DETAIL = Detail(
     url=URL,
     description="A display.",
-    specs={"Resolution": "320x480"},
     wiki_url="https://www.waveshare.com/wiki/X",
     images=("https://www.waveshare.com/media/catalog/product/x.jpg",),
     variants=(Variant(sku="1", label="with case", attributes=("with case",), unsaleable=False),),
@@ -40,7 +40,6 @@ def test_saves_and_reads_back_a_product(db: sqlite3.Connection) -> None:
     assert row["part_no"] == "X-1"
     assert row["price_min"] == 9.99
     assert row["has_options"] == 1
-    assert known_product_urls(db) == {URL}
 
 
 def test_saving_the_same_product_twice_updates_it(db: sqlite3.Connection) -> None:
@@ -79,7 +78,6 @@ def test_saves_a_detail_with_its_variants(db: sqlite3.Connection) -> None:
     detail = db.execute("SELECT * FROM details").fetchone()
     variant = db.execute("SELECT * FROM variants").fetchone()
 
-    assert json.loads(detail["specs_json"]) == {"Resolution": "320x480"}
     assert detail["wiki_url"] == "https://www.waveshare.com/wiki/X"
     assert variant["sku"] == "1"
     assert json.loads(variant["attributes_json"]) == ["with case"]
@@ -105,4 +103,59 @@ def test_counts_every_table(db: sqlite3.Connection) -> None:
         "product_categories": 0,
         "details": 0,
         "variants": 0,
+        "details_outdated": 0,
     }
+
+
+def test_the_product_page_price_range_overrides_the_listing(db: sqlite3.Connection) -> None:
+    """A listing shows one figure even for multi-option products; the page shows the range."""
+    save_products(db, [PRODUCT])
+
+    save_detail(db, replace(DETAIL, price_min=25.99, price_max=32.99))
+
+    row = db.execute("SELECT price_min, price_max FROM products").fetchone()
+    assert (row["price_min"], row["price_max"]) == (25.99, 32.99)
+
+
+def test_a_detail_without_a_price_leaves_the_listing_alone(db: sqlite3.Connection) -> None:
+    save_products(db, [PRODUCT])
+
+    save_detail(db, DETAIL)
+
+    assert db.execute("SELECT price_min FROM products").fetchone()["price_min"] == 9.99
+
+
+def test_details_written_by_an_older_parser_are_counted(db: sqlite3.Connection) -> None:
+    save_detail(db, DETAIL)
+    db.execute("UPDATE details SET parser_version = 0")
+
+    assert counts(db)["details_outdated"] == 1
+
+
+def test_saves_the_option_axes(db: sqlite3.Connection) -> None:
+    save_detail(db, replace(DETAIL, axes={"Version Options": ("with case", "without case")}))
+
+    row = db.execute("SELECT axes_json FROM details").fetchone()
+
+    assert json.loads(row["axes_json"]) == {"Version Options": ["with case", "without case"]}
+
+
+def test_opens_a_database_created_by_an_older_version(tmp_path: Path) -> None:
+    """An upgrade must not strand a database that predates the newer columns."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        "CREATE TABLE products (url TEXT PRIMARY KEY, slug TEXT, name TEXT, part_no TEXT,"
+        " price_min REAL, price_max REAL, currency TEXT, image TEXT, listed_at TEXT);"
+        "CREATE TABLE details (product_url TEXT PRIMARY KEY, description TEXT, wiki_url TEXT,"
+        " images_json TEXT, fetched_at TEXT, parser_version INTEGER);"
+    )
+    old.commit()
+    old.close()
+
+    with open_db(path) as connection:
+        save_products(connection, [PRODUCT])
+        save_detail(connection, replace(DETAIL, axes={"Version Options": ("with case",)}))
+
+        assert connection.execute("SELECT has_options FROM products").fetchone()[0] == 1
+        assert connection.execute("SELECT axes_json FROM details").fetchone()[0]

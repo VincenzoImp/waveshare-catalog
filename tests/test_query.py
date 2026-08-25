@@ -68,7 +68,6 @@ def test_can_select_by_whether_the_detail_page_was_fetched(
         Detail(
             url="https://www.waveshare.com/a.htm",
             description="",
-            specs={},
             wiki_url=None,
             images=(),
             variants=(),

@@ -1,5 +1,7 @@
 # waveshare-catalog
 
+[![CI](https://github.com/VincenzoImp/waveshare-catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/VincenzoImp/waveshare-catalog/actions/workflows/ci.yml)
+
 Collect the [Waveshare](https://www.waveshare.com) product catalogue into a local SQLite
 database, then filter it offline as many times as you like.
 
@@ -33,8 +35,9 @@ uv run waveshare-catalog detail --all
 uv run waveshare-catalog export --format csv --price-max 60 > shortlist.csv
 ```
 
-`stats` shows how much has been collected. `reparse` re-runs the parsers over pages already
-on disk, which costs no network at all.
+`stats` shows how much has been collected, including how many product pages were parsed by
+an older version of the code. `reparse` re-runs the parsers over pages already on disk,
+which costs no network at all and is how you pick those up after an upgrade.
 
 ## About the crawl delay
 
@@ -71,8 +74,22 @@ parser fix can be replayed with `reparse` without touching the network again.
 ## What gets stored
 
 `waveshare.db` holds categories, products, the category memberships, and for products you
-fetched in full: description, spec table, wiki link, images and one row per purchasable
-variant with its SKU.
+fetched in full: description, wiki link, images, the option axes (`Version Options: with
+case, without case`) and one row per purchasable variant with its SKU.
+
+Two notes on what you get, because both are easy to get wrong:
+
+**Prices.** A category listing prints a single figure even when a product has options, so
+after `sync` you only know the entry price. The product page carries the real range, for
+example `$25.99 - $32.99`, and `detail` writes it back over the listing figure. So
+`price_max` is populated exactly for the products whose page you fetched.
+
+**Specifications are not a structured field.** Waveshare does not publish a spec table on
+product pages; the details live in the prose. The full description is stored, typically a
+few thousand words including resolution, interfaces and dimensions, but there is no
+`specs` dictionary to query. A parser that mined the prose would be guesswork that breaks
+on the first page written differently, so the field is deliberately absent rather than
+present and empty.
 
 Waveshare's variants are not standard Magento. The page carries its own blob:
 

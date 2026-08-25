@@ -36,9 +36,9 @@ def test_a_product_without_variants_yields_none() -> None:
 
     assert detail.variants == ()
     assert detail.description == ""
-    assert detail.specs == {}
     assert detail.wiki_url is None
     assert detail.images == ()
+    assert detail.price_min is None
 
 
 def test_survives_a_malformed_variant_blob() -> None:
@@ -62,20 +62,30 @@ def test_accepts_the_sku_key_with_or_without_its_trailing_space() -> None:
     assert [(v.sku, v.unsaleable) for v in variants] == [("1", True), ("2", False)]
 
 
-def test_reads_two_column_spec_tables() -> None:
-    html = """
-    <table>
-      <tr><th>Resolution</th><td>320x480</td></tr>
-      <tr><td>Resolution</td><td>ignored duplicate</td></tr>
-      <tr><td>Touch</td><td>capacitive</td></tr>
-      <tr><td>only one cell</td></tr>
-      <tr><td></td><td>no name</td></tr>
-    </table>
-    """
+def test_reads_the_price_range_of_a_real_product(product_html: str) -> None:
+    detail = product.parse(URL, product_html)
 
-    specs = product.parse(URL, html).specs
+    assert (detail.price_min, detail.price_max) == (25.99, 32.99)
 
-    assert specs == {"Resolution": "320x480", "Touch": "capacitive"}
+
+def test_a_single_price_gives_an_equal_range() -> None:
+    html = '<span class="waveshare_price-box"><span class="price">$9.99</span></span>'
+
+    detail = product.parse(URL, html)
+
+    assert (detail.price_min, detail.price_max) == (9.99, 9.99)
+
+
+def test_the_zero_placeholder_is_not_a_price() -> None:
+    html = '<span class="waveshare_price-box"><span class="price">$0.00</span></span>'
+
+    assert product.parse(URL, html).price_min is None
+
+
+def test_an_unreadable_price_is_left_unset() -> None:
+    html = '<span class="waveshare_price-box"><span class="price">on request</span></span>'
+
+    assert product.parse(URL, html).price_min is None
 
 
 def test_reads_the_description_block() -> None:
@@ -93,3 +103,9 @@ def test_option_axes_ignores_incomplete_groups() -> None:
     """
 
     assert product.option_axes(html) == {}
+
+
+def test_the_parsed_detail_carries_the_axes(product_html: str) -> None:
+    detail = product.parse(URL, product_html)
+
+    assert detail.axes["Version Options"] == ("with case and OV5640 camera", "without case")
