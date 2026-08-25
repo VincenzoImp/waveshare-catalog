@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.31"]
+build-backend = "hatchling.build"
+
+[project]
+name = "waveshare-catalog"
+dynamic = ["version"]
+description = "Collect the Waveshare product catalogue into a local database you can query offline"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{name = "Vincenzo Imperati", email = "vincenzo@imperati.dev"}]
+keywords = ["waveshare", "catalogue", "crawler", "scraping", "hardware"]
+dependencies = ["httpx>=0.28", "beautifulsoup4>=4.13", "lxml>=5.3"]
+
+[project.scripts]
+waveshare-catalog = "waveshare_catalog.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1,<0.17",
+    "mypy>=2.3,<3",
+    "pytest>=9.1",
+    "pytest-cov>=7",
+    "types-beautifulsoup4",
+]
+
+[tool.hatch.version]
+path = "src/waveshare_catalog/__init__.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = "--import-mode=importlib --strict-markers --strict-config -ra"
+xfail_strict = true
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src/waveshare_catalog"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+exclude_also = ['^\s*\.\.\.$']
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+mypy_path = "tests"

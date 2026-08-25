@@ -1,0 +1,26 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# Caches and test output
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Crawl output
+cache/
+*.db
+out/
+
+# macOS
+.DS_Store
