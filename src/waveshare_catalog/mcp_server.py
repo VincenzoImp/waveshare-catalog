@@ -20,7 +20,13 @@ import os
 import sqlite3
 from pathlib import Path
 
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError as missing:  # the entry point exists even without the optional extra
+    raise SystemExit(
+        "waveshare-catalog-mcp needs the MCP SDK, which is an optional extra.\n"
+        'Install it with:  uv tool install "waveshare-catalog[mcp]"'
+    ) from missing
 
 # Any single answer has to fit in a model's context, and a careless `SELECT *` over 2,350
 # products would not. Callers that want more can page with LIMIT and OFFSET.

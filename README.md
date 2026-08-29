@@ -151,14 +151,16 @@ Waveshare's `robots.txt` asks for `Crawl-delay: 60` and `Request-rate: 1/60`, on
 minute. This tool reads that file and obeys it by default, single threaded. `--delay`
 overrides it: going faster than a site asks is your call, not the tool's default.
 
-Pages are around 300 KB and the site answers in about 2 s, so:
+Pages are around 300 KB. The last column is measured wall clock, not arithmetic: with
+`--delay 1` a page takes about 2.1 s, because the site's own response time dominates the
+delay rather than adding to it.
 
-| goal | requests | at 60 s | at 1 s |
+| goal | requests | at 60 s | at `--delay 1` |
 |---|---|---|---|
 | every URL, plus metadata for 80% | 25 | ~26 min | ~1 min |
-| the same, with category membership | ~75 | ~75 min | ~4 min |
-| every product page | 2,350 | ~40 h | ~2 h |
-| every wiki as well | +1,662 | ~28 h | ~1.5 h |
+| the same, with category membership | ~75 | ~75 min | ~3 min |
+| every product page | 2,350 | ~40 h | ~1.5 h |
+| every wiki as well | +1,662 | ~28 h | ~1 h |
 
 Nothing is lost to an interruption: every response is cached gzipped under `cache/`, keyed by
 URL, and progress is committed as it goes.

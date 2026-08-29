@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,3 +93,15 @@ def test_main_starts_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp_server.main()
 
     assert started == [True]
+
+
+def test_a_plain_install_is_told_which_extra_it_needs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The entry point is declared unconditionally, so it must explain itself, not traceback."""
+    monkeypatch.setitem(sys.modules, "mcp.server.mcpserver", None)
+
+    with pytest.raises(SystemExit) as failure:
+        importlib.reload(mcp_server)
+
+    assert "waveshare-catalog[mcp]" in str(failure.value)
+    monkeypatch.undo()
+    importlib.reload(mcp_server)  # leave the module usable for every other test
