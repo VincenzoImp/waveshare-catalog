@@ -31,8 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="page cache directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sync = sub.add_parser("sync", help="index the sitemap and read every category listing")
+    sync = sub.add_parser("sync", help="register every product and read the root listing")
     sync.add_argument("--delay", type=float, help="seconds between requests, overriding robots.txt")
+    sync.add_argument(
+        "--with-categories",
+        action="store_true",
+        help="also walk the top-level categories, to record which products belong where",
+    )
     sync.add_argument("--limit-categories", type=int, help="stop after this many categories")
 
     detail = sub.add_parser("detail", help="fetch full product pages")
@@ -63,6 +68,7 @@ def _add_filter_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--price-min", type=float)
     parser.add_argument("--price-max", type=float)
     parser.add_argument("--with-options", action="store_true", help="only multi-option products")
+    parser.add_argument("--unlisted", action="store_true", help="only products no category lists")
     parser.add_argument("--limit", type=int)
 
 
@@ -74,6 +80,7 @@ def _filter_from(args: argparse.Namespace) -> query.Filter:
         price_min=args.price_min,
         price_max=args.price_max,
         has_options=True if args.with_options else None,
+        listed=False if args.unlisted else None,
         limit=args.limit,
     )
 
@@ -83,9 +90,19 @@ def _fetcher(args: argparse.Namespace, delay: float | None) -> Fetcher:
 
 
 def run_sync(
-    fetcher: Fetcher, connection: sqlite3.Connection, limit: int | None, out: TextIO
+    fetcher: Fetcher,
+    connection: sqlite3.Connection,
+    limit: int | None,
+    out: TextIO,
+    *,
+    with_categories: bool = False,
 ) -> int:
-    """Index the sitemap, then read every category listing it names."""
+    """Register every product the sitemap names, then read the root listing for metadata.
+
+    The root listing is the whole shortcut: it returns 80 products per request and covers
+    about 80% of the catalogue in two dozen requests. Walking the category tree instead
+    costs ten times as much and finds no more products, so it is opt-in.
+    """
     index = sitemap.parse(fetcher.get(sitemap.SITEMAP_URL).text)
     known = set(index.categories)
     store.save_categories(
@@ -95,9 +112,17 @@ def run_sync(
             for url in index.categories
         ],
     )
-    print(f"sitemap: {len(index.products)} products, {len(index.categories)} categories", file=out)
+    registered = store.register_products(connection, index.products)
+    print(f"sitemap: {registered} products, {len(index.categories)} categories", file=out)
 
-    categories = index.categories[:limit] if limit is not None else index.categories
+    categories = [sitemap.ROOT_CATEGORY]
+    if with_categories:
+        # Depth 1 is the best of the category routes: the leaves cost far more and,
+        # measured against the sitemap, turn up nothing the root listing missed.
+        categories += [url for url in index.categories if sitemap.category_depth(url) == 1]
+    if limit is not None:
+        categories = categories[:limit]
+
     listed = 0
     for position, category in enumerate(categories, start=1):
         found = _read_category(fetcher, connection, category, out)
@@ -192,7 +217,13 @@ def _dispatch(args: argparse.Namespace) -> int:
     out = sys.stdout
     with store.open_db(args.db) as connection:
         if args.command == "sync":
-            return run_sync(_fetcher(args, args.delay), connection, args.limit_categories, out)
+            return run_sync(
+                _fetcher(args, args.delay),
+                connection,
+                args.limit_categories,
+                out,
+                with_categories=args.with_categories,
+            )
         if args.command == "detail":
             urls = list(args.url)
             if args.name or args.all:

@@ -124,6 +124,18 @@ def save_categories(
     return len(rows)
 
 
+def register_products(connection: sqlite3.Connection, urls: Iterable[str]) -> int:
+    """Record product URLs the sitemap knows about, without touching what is already there.
+
+    Roughly a fifth of the catalogue appears in no category at all, so the sitemap is the
+    only place those products are ever named. They land here with a URL and a slug and no
+    name, which is what marks them as never listed.
+    """
+    rows = [(url, Product(url=url, name="").slug) for url in urls]
+    connection.executemany("INSERT OR IGNORE INTO products (url, slug) VALUES (?, ?)", rows)
+    return len(rows)
+
+
 def save_products(
     connection: sqlite3.Connection, products: Iterable[Product], category_url: str | None = None
 ) -> int:
@@ -209,6 +221,12 @@ def counts(connection: sqlite3.Connection) -> dict[str, int]:
         table: int(connection.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"])
         for table in tables
     }
+    # Products known by URL only, because no category lists them.
+    counted["products_unlisted"] = int(
+        connection.execute(
+            "SELECT count(*) AS n FROM products WHERE name IS NULL OR name = ''"
+        ).fetchone()["n"]
+    )
     # Details written by an older parser: `reparse` refreshes these from the cache.
     counted["details_outdated"] = int(
         connection.execute(

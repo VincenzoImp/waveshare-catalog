@@ -17,9 +17,14 @@ ROBOTS = "https://www.waveshare.com/robots.txt"
 SITEMAP = "https://www.waveshare.com/sitemap.xml"
 CATEGORY = "https://www.waveshare.com/product/displays.htm"
 PRODUCT_URL = "https://www.waveshare.com/a.htm"
+# A product the listing never mentions, like the fifth of the real catalogue that
+# belongs to no category and is reachable only through the sitemap.
+ORPHAN_URL = "https://www.waveshare.com/orphan.htm"
+ROOT = "https://www.waveshare.com/product.htm"
 
 SITEMAP_XML = (
-    f"<urlset><url><loc>{CATEGORY}</loc></url><url><loc>{PRODUCT_URL}</loc></url></urlset>"
+    f"<urlset><url><loc>{ROOT}</loc></url><url><loc>{CATEGORY}</loc></url>"
+    f"<url><loc>{PRODUCT_URL}</loc></url><url><loc>{ORPHAN_URL}</loc></url></urlset>"
 )
 
 LISTING_HTML = """
@@ -38,8 +43,10 @@ PRODUCT_HTML = (
 PAGES = {
     ROBOTS: (200, "User-agent: *\nCrawl-delay: 60\n"),
     SITEMAP: (200, SITEMAP_XML),
+    f"{ROOT}?limit=80&p=1": (200, LISTING_HTML),
     f"{CATEGORY}?limit=80&p=1": (200, LISTING_HTML),
     PRODUCT_URL: (200, PRODUCT_HTML),
+    ORPHAN_URL: (200, PRODUCT_HTML),
 }
 
 
@@ -78,9 +85,13 @@ def test_sync_indexes_the_sitemap_and_reads_categories(
     assert run(workspace, "sync") == 0
 
     out = capsys.readouterr().out
-    assert "1 products, 1 categories" in out
-    assert rows(workspace, "SELECT * FROM products")[0]["part_no"] == "A-1"
-    assert rows(workspace, "SELECT * FROM categories")[0]["name"] == "displays"
+    assert "2 products, 2 categories" in out
+    listed = rows(workspace, "SELECT * FROM products WHERE name IS NOT NULL")
+    assert listed[0]["part_no"] == "A-1"
+    assert {r["name"] for r in rows(workspace, "SELECT * FROM categories")} == {
+        "product",
+        "displays",
+    }
 
 
 def test_sync_can_stop_early(workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -92,7 +103,7 @@ def test_sync_can_stop_early(workspace: Path, capsys: pytest.CaptureFixture[str]
 def test_sync_reports_a_category_it_could_not_read(
     workspace: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pages = {k: v for k, v in PAGES.items() if not k.startswith(CATEGORY)}
+    pages = {k: v for k, v in PAGES.items() if not k.startswith(ROOT + "?")}
     monkeypatch.setattr(
         cli,
         "_fetcher",
@@ -187,7 +198,10 @@ def test_stats_counts_the_tables(workspace: Path, capsys: pytest.CaptureFixture[
     run(workspace, "sync")
 
     assert run(workspace, "stats") == 0
-    assert "products             1" in capsys.readouterr().out
+
+    out = capsys.readouterr().out
+    assert "products             2" in out
+    assert "products_unlisted    1" in out
 
 
 def test_version_is_reported(capsys: pytest.CaptureFixture[str]) -> None:
@@ -212,8 +226,8 @@ def test_sync_follows_the_pager_across_pages(
     second = LISTING_HTML.replace("a.htm", "b.htm").replace("A-1", "B-2")
     pages = {
         **PAGES,
-        f"{CATEGORY}?limit=80&p=1": (200, first),
-        f"{CATEGORY}?limit=80&p=2": (200, second),
+        f"{ROOT}?limit=80&p=1": (200, first),
+        f"{ROOT}?limit=80&p=2": (200, second),
     }
     monkeypatch.setattr(
         cli,
@@ -224,7 +238,8 @@ def test_sync_follows_the_pager_across_pages(
     assert run(workspace, "sync") == 0
 
     assert "listed 2 product rows" in capsys.readouterr().out
-    assert len(rows(workspace, "SELECT * FROM products")) == 2
+    named = rows(workspace, "SELECT * FROM products WHERE name IS NOT NULL")
+    assert len(named) == 2
 
 
 def test_the_default_fetcher_is_wired_to_the_real_client(tmp_path: Path) -> None:
@@ -255,7 +270,7 @@ def test_detail_all_takes_every_product_without_a_page(workspace: Path) -> None:
     run(workspace, "sync")
 
     assert run(workspace, "detail", "--all") == 0
-    assert len(rows(workspace, "SELECT * FROM details")) == 1
+    assert len(rows(workspace, "SELECT * FROM details")) == 2
 
     # Second run has nothing left to do, which is what makes a long crawl resumable.
     assert run(workspace, "detail", "--all") == 1
@@ -304,3 +319,47 @@ def test_the_eta_is_shown_while_fetching_details(
     run(workspace, "detail", "--url", PRODUCT_URL, "--url", "https://www.waveshare.com/b.htm")
 
     assert "1h00m left" in capsys.readouterr().out
+
+
+def test_sync_reaches_products_that_no_category_lists(workspace: Path) -> None:
+    """The point of registering the sitemap: an orphan must become fetchable."""
+    run(workspace, "sync")
+
+    urls = {r["url"] for r in rows(workspace, "SELECT url FROM products")}
+    assert ORPHAN_URL in urls
+
+    assert run(workspace, "detail", "--all") == 0
+    fetched = {r["product_url"] for r in rows(workspace, "SELECT product_url FROM details")}
+    assert ORPHAN_URL in fetched
+
+
+def test_query_can_isolate_the_unlisted_products(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(workspace, "sync")
+    capsys.readouterr()
+
+    assert run(workspace, "query", "--unlisted") == 0
+
+    out = capsys.readouterr().out
+    assert "1 products" in out
+
+
+def test_sync_only_reads_the_root_unless_asked_for_categories(workspace: Path) -> None:
+    run(workspace, "sync")
+    without = {
+        r["category_url"] for r in rows(workspace, "SELECT category_url FROM product_categories")
+    }
+
+    assert without == {ROOT}
+
+
+def test_with_categories_adds_the_top_level_listings(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(workspace, "sync", "--with-categories") == 0
+
+    used = {
+        r["category_url"] for r in rows(workspace, "SELECT category_url FROM product_categories")
+    }
+    assert used == {ROOT, CATEGORY}

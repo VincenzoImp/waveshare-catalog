@@ -17,6 +17,7 @@ class Filter:
     price_max: float | None = None
     has_options: bool | None = None
     detailed: bool | None = None
+    listed: bool | None = None
     limit: int | None = None
 
 
@@ -46,6 +47,12 @@ def search(connection: sqlite3.Connection, criteria: Filter) -> list[sqlite3.Row
     if criteria.has_options is not None:
         where.append("p.has_options = ?")
         params.append(int(criteria.has_options))
+    if criteria.listed is not None:
+        where.append(
+            "p.name IS NOT NULL AND p.name != ''"
+            if criteria.listed
+            else "(p.name IS NULL OR p.name = '')"
+        )
     if criteria.detailed is not None:
         clause = "EXISTS" if criteria.detailed else "NOT EXISTS"
         where.append(f"{clause} (SELECT 1 FROM details d WHERE d.product_url = p.url)")

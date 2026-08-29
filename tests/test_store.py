@@ -13,6 +13,7 @@ from waveshare_catalog.store import (
     Variant,
     counts,
     open_db,
+    register_products,
     save_categories,
     save_detail,
     save_products,
@@ -103,6 +104,7 @@ def test_counts_every_table(db: sqlite3.Connection) -> None:
         "product_categories": 0,
         "details": 0,
         "variants": 0,
+        "products_unlisted": 0,
         "details_outdated": 0,
     }
 
@@ -159,3 +161,25 @@ def test_opens_a_database_created_by_an_older_version(tmp_path: Path) -> None:
 
         assert connection.execute("SELECT has_options FROM products").fetchone()[0] == 1
         assert connection.execute("SELECT axes_json FROM details").fetchone()[0]
+
+
+def test_registering_a_url_creates_a_bare_product(db: sqlite3.Connection) -> None:
+    """Products no category lists exist only in the sitemap, so this is their only way in."""
+    registered = register_products(db, ["https://www.waveshare.com/1.02inch-e-paper.htm"])
+
+    row = db.execute("SELECT slug, name FROM products").fetchone()
+
+    assert registered == 1
+    assert row["slug"] == "1.02inch-e-paper"
+    assert row["name"] is None
+    assert counts(db)["products_unlisted"] == 1
+
+
+def test_registering_never_overwrites_listing_metadata(db: sqlite3.Connection) -> None:
+    save_products(db, [PRODUCT])
+
+    register_products(db, [URL])
+
+    row = db.execute("SELECT name, price_min FROM products").fetchone()
+    assert (row["name"], row["price_min"]) == ("A display", 9.99)
+    assert counts(db)["products_unlisted"] == 0

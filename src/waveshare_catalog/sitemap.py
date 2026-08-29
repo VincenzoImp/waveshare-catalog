@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
 SITEMAP_URL = "https://www.waveshare.com/sitemap.xml"
+# The root listing, which pages through most of the catalogue on its own.
+ROOT_CATEGORY = "https://www.waveshare.com/product.htm"
 
 _LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 
