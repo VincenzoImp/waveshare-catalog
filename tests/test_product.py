@@ -109,3 +109,11 @@ def test_the_parsed_detail_carries_the_axes(product_html: str) -> None:
     detail = product.parse(URL, product_html)
 
     assert detail.axes["Version Options"] == ("with case and OV5640 camera", "without case")
+
+
+def test_images_are_limited_to_the_product_itself(product_html: str) -> None:
+    """A page shows ~57 catalogue thumbnails; all but a handful belong to related items."""
+    detail = product.parse(URL, product_html)
+
+    assert len(detail.images) == 8
+    assert all("esp32-s3-touch-lcd-3.5" in image for image in detail.images)

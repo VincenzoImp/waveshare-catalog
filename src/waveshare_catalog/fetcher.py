@@ -153,6 +153,18 @@ class Fetcher:
         if remaining > 0:
             self._sleep(remaining)
 
+    def close(self) -> None:
+        """Release the client's connections. Harmless for clients that hold none."""
+        closer = getattr(self._client, "close", None)
+        if callable(closer):
+            closer()
+
+    def __enter__(self) -> Fetcher:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     def _require_rules(self) -> robots.Rules:
         assert self._rules is not None  # get() always loads them first
         return self._rules

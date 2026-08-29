@@ -20,6 +20,10 @@ DEFAULT_CACHE = Path("cache")
 # from looping forever during an unattended crawl.
 MAX_PAGES = 200
 
+# A full crawl runs for hours. Without an occasional commit, everything since the start
+# would be lost the moment it is interrupted, even though the pages are safe in the cache.
+COMMIT_EVERY = 25
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -126,6 +130,7 @@ def run_sync(
     listed = 0
     for position, category in enumerate(categories, start=1):
         found = _read_category(fetcher, connection, category, out)
+        connection.commit()
         listed += found
         print(f"  [{position}/{len(categories)}] {category} -> {found}", file=out)
     print(f"listed {listed} product rows", file=out)
@@ -168,6 +173,8 @@ def run_detail(
             continue
         detail = product.parse(url, page.text)
         store.save_detail(connection, detail)
+        if position % COMMIT_EVERY == 0:
+            connection.commit()
         print(f"  {progress} {url} -> {len(detail.variants)} variants", file=out)
     return 1 if failures else 0
 
@@ -217,13 +224,14 @@ def _dispatch(args: argparse.Namespace) -> int:
     out = sys.stdout
     with store.open_db(args.db) as connection:
         if args.command == "sync":
-            return run_sync(
-                _fetcher(args, args.delay),
-                connection,
-                args.limit_categories,
-                out,
-                with_categories=args.with_categories,
-            )
+            with _fetcher(args, args.delay) as fetcher:
+                return run_sync(
+                    fetcher,
+                    connection,
+                    args.limit_categories,
+                    out,
+                    with_categories=args.with_categories,
+                )
         if args.command == "detail":
             urls = list(args.url)
             if args.name or args.all:
@@ -234,7 +242,8 @@ def _dispatch(args: argparse.Namespace) -> int:
             if not urls:
                 print("nothing to fetch: pass --url, --name or --all", file=out)
                 return 1
-            return run_detail(_fetcher(args, args.delay), connection, urls, out)
+            with _fetcher(args, args.delay) as fetcher:
+                return run_detail(fetcher, connection, urls, out)
         if args.command == "query":
             rows = query.search(connection, _filter_from(args))
             for row in rows:

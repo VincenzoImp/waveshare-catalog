@@ -363,3 +363,33 @@ def test_with_categories_adds_the_top_level_listings(
         r["category_url"] for r in rows(workspace, "SELECT category_url FROM product_categories")
     }
     assert used == {ROOT, CATEGORY}
+
+
+def test_a_long_detail_run_commits_as_it_goes(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two hours of crawling must not vanish on a Ctrl-C, so progress is committed."""
+    seen_by_another_connection: list[int] = []
+
+    class Watching(FakeClient):
+        def get(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+            if url == ORPHAN_URL:  # the second product: look at what the first one left
+                other = sqlite3.connect(workspace / "db.sqlite")
+                try:
+                    seen_by_another_connection.append(
+                        other.execute("SELECT count(*) FROM details").fetchone()[0]
+                    )
+                finally:
+                    other.close()
+            return super().get(url, headers)
+
+    monkeypatch.setattr(cli, "COMMIT_EVERY", 1)
+    monkeypatch.setattr(
+        cli,
+        "_fetcher",
+        lambda args, delay: Fetcher(Watching(PAGES), Cache(workspace / "c6"), delay=0),
+    )
+
+    run(workspace, "detail", "--url", PRODUCT_URL, "--url", ORPHAN_URL)
+
+    assert seen_by_another_connection == [1]

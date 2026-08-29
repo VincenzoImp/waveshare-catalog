@@ -23,7 +23,7 @@ def parse(url: str, html: str) -> Detail:
         url=url,
         description=_description(soup),
         wiki_url=_wiki_url(soup),
-        images=_images(soup),
+        images=_images(soup, url),
         variants=_variants(html),
         axes=option_axes(html),
         price_min=low,
@@ -120,10 +120,16 @@ def _wiki_url(soup: BeautifulSoup) -> str | None:
     return None
 
 
-def _images(soup: BeautifulSoup) -> tuple[str, ...]:
+def _images(soup: BeautifulSoup, url: str) -> tuple[str, ...]:
+    """The product's own photos.
+
+    A page shows around 57 catalogue thumbnails but only a handful are this product;
+    the rest belong to related items and would be dead weight in every row.
+    """
+    slug = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".htm").lower()
     seen: dict[str, None] = {}
     for image in soup.select("img[src]"):
         src = image.get("src")
-        if isinstance(src, str) and "/media/catalog/product/" in src:
+        if isinstance(src, str) and "/media/catalog/product/" in src and slug in src.lower():
             seen[src] = None
     return tuple(seen)

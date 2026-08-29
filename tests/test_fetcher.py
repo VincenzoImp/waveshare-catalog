@@ -208,3 +208,25 @@ def test_the_cache_accepts_a_plain_string_path(tmp_path: Path) -> None:
     cache.write(PAGE, "one")
 
     assert cache.read(PAGE) == "one"
+
+
+def test_closing_releases_the_client(tmp_path: Path) -> None:
+    """The real client holds a connection pool, so a long crawl must not leak it."""
+
+    class Closable(FakeClient):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Closable({ROBOTS: (200, POLITE)})
+    with Fetcher(client, Cache(tmp_path / "c")) as fetcher:
+        assert fetcher.delay is None
+
+    assert client.closed
+
+
+def test_closing_a_client_without_close_is_harmless(tmp_path: Path) -> None:
+    fetcher, _, _ = build(tmp_path, {ROBOTS: (200, POLITE)})
+
+    fetcher.close()
