@@ -40,7 +40,11 @@ minutes.
   crawl delay. It records what each product's wiki offers for download in `resources`,
   classified as `cad`, `schematic`, `datasheet`, `demo` or `software`. The CAD entry is the
   2D and 3D geometry, which is what you need to design an enclosure; a shop page links no
-  files at all, so the wiki is the only source.
+  files at all, so the wiki is the only source. Reading all 1,662 of them found 10,966
+  files, among them CAD geometry for 520 products and a schematic for 802.
+- A handful of product pages write their wiki link relative to the site root rather than
+  absolutely. Those three fetches used to fail; they are now resolved. Four more wikis stay
+  unreachable because the page links one the site does not have.
 - Only the links are taken. The wiki's prose is an Arduino tutorial and its tables list
   library versions, so harvesting them would have filed `v8.4.0 = "Install Online"` as a
   specification.

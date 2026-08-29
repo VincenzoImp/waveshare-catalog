@@ -20,7 +20,7 @@ Tables, and where each one's facts come from.
 - specs(product_url, key, key_norm, value, source)
   Facts as the page's own specification table states them, keys verbatim. `key_norm` is
   the key lowercased with whitespace collapsed, which is what you should filter on. There
-  is no fixed vocabulary: 2,570 distinct keys, the commonest 40 covering under a third.
+  is no fixed vocabulary: 2,572 distinct keys, the commonest 40 covering under a third.
   Pin assignments are prefixed `pin:`.
 - variants(product_url, sku, label, attributes_json, unsaleable)
   One row per purchasable combination. Per-variant prices are not available: the site

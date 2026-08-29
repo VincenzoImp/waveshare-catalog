@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS variants (
     unsaleable INTEGER, PRIMARY KEY (product_url, sku));
 
 -- One row per fact the page states about the product, key kept verbatim. The catalogue
--- has no fixed vocabulary: 2,570 distinct keys across the whole of it, of which the 40
+-- has no fixed vocabulary: 2,572 distinct keys across the whole of it, of which the 40
 -- commonest cover under a third, so columns would silently drop the tail. `value` is part
 -- of the key because a page may legitimately state one key twice.
 CREATE TABLE IF NOT EXISTS specs (

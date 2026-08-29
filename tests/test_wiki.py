@@ -58,3 +58,32 @@ def test_an_upload_path_counts_as_a_file() -> None:
 def test_the_stored_link_is_upgraded_to_tls() -> None:
     assert wiki.url_of("http://www.waveshare.com/wiki/X") == "https://www.waveshare.com/wiki/X"
     assert wiki.url_of(" https://www.waveshare.com/wiki/X ") == "https://www.waveshare.com/wiki/X"
+
+
+def test_a_relative_wiki_link_is_resolved_against_the_site() -> None:
+    """A handful of product pages write the link relative, which used to fail the fetch."""
+    assert wiki.url_of("/wiki/PI4-CASE-NANOSOUND-ONE") == (
+        "https://www.waveshare.com/wiki/PI4-CASE-NANOSOUND-ONE"
+    )
+    assert wiki.url_of("/wiki/index.php?title=MISC_CAPE") == (
+        "https://www.waveshare.com/wiki/index.php?title=MISC_CAPE"
+    )
+
+
+def test_classifies_the_less_obvious_names_too() -> None:
+    """Each of these was landing in `other` until the real catalogue showed how common it is."""
+    html = "".join(
+        (
+            link("https://files.waveshare.com/x/asm.zip", "Assembly diagram"),
+            link("https://files.waveshare.com/x/rp2-pico-v1.15.uf2", "Pico firmware"),
+            link("https://files.waveshare.com/x/cp2102.zip", "CP2102 Driver"),
+            link("https://files.waveshare.com/x/pinout.pdf", "Pico2 Pinout definition"),
+        )
+    )
+
+    assert {r.title: r.kind for r in wiki.parse(html)} == {
+        "Assembly diagram": "cad",
+        "Pico firmware": "demo",
+        "CP2102 Driver": "software",
+        "Pico2 Pinout definition": "datasheet",
+    }

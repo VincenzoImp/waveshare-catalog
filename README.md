@@ -116,9 +116,10 @@ network and is how you pick up a parser fix.
 
 Four things measured against the live site, each of which decides how the tool works.
 
-**A fifth of the catalogue is in no category at all.** 465 of the 2,350 products are listed in
-`sitemap.xml`, have a live page and can be bought, yet appear under no category.
-`1.02inch-e-paper.htm` is one of them: a real 1.02inch e-Paper module at $5.99, absent from
+**A fifth of the catalogue is in no category at all.** 504 of the 2,355 products are listed in
+`sitemap.xml`, have a live page and can be bought, yet appear under none of the 13 top-level
+categories; walking all 225 leaves instead still leaves 465 of them unreachable.
+`1.02inch-e-paper.htm` is one: a real 1.02inch e-Paper module at $5.99, absent from
 `/product/displays/e-paper.htm` and from every `epaper-N` subcategory. So `sync` registers
 every URL the sitemap names. Without that, no amount of crawling would find them — and they
 are exactly where the products nobody knows about live.
@@ -136,7 +137,8 @@ it will not find you a single extra product.
 
 **Each page states its facts in a table, and buries a second one.** The product page carries
 its own specification table — size, resolution, driver IC, touch IC, the active area in
-millimetres — and also a comparison matrix of the entire product family, up to 92 rows wide.
+millimetres — and also a comparison matrix of the entire product family, naming as many as
+161 related models on a single page.
 Both are parsed into `specs` and `family_specs`. Before that they were flattened into the
 description, where searching for "with case" returned 306 products when only 88 have one: the
 rest of the hits belonged to a sibling.
@@ -171,7 +173,7 @@ URL, and progress is committed as it goes.
 purchasable combinations, but the price of one exact combination is computed in JavaScript
 when you click it. `variants` therefore has SKUs and labels but no prices.
 
-**A tidy specification vocabulary.** 2,570 distinct keys appear across the catalogue and the
+**A tidy specification vocabulary.** 2,572 distinct keys appear across the catalogue and the
 40 commonest cover under a third of them. Keys are stored exactly as written, with a
 lowercased `key_norm` to filter on. Mapping them onto a fixed set of columns would drop the
 tail silently, so it is not done.

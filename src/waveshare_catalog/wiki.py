@@ -9,6 +9,7 @@ the wiki carries the CAD geometry, the schematic and every component datasheet.
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -18,15 +19,18 @@ from waveshare_catalog.store import Resource
 # and "ESP32-S3 Series Datasheet" and "ES8311 User Guide" are both PDFs. First match wins,
 # so the more specific kinds come first.
 KINDS: tuple[tuple[str, str], ...] = (
-    ("cad", r"\b2d\b|\b3d\b|dimension|drawing|\.step$|\.stp$|\.dxf$|\.dwg$"),
+    ("cad", r"\b2d\b|\b3d\b|dimension|drawing|assembly|\.step$|\.stp$|\.dxf$|\.dwg$"),
     ("schematic", r"schematic|\.sch$|\.brd$"),
-    ("datasheet", r"datasheet|manual|user guide|specification"),
-    ("demo", r"\bdemo\b|\bexample|\bsample|\bcodes?\b|firmware|program"),
+    ("datasheet", r"datasheet|manual|user guide|specification|pinout"),
+    ("demo", r"\bdemo\b|\bexample|\bsample|\bcodes?\b|firmware|program|\.uf2$"),
     # No word boundary before "tool": the files are named `flash_download_tool.zip`.
-    ("software", r"software|tool|conversion|converter|installation"),
+    ("software", r"software|tool|conversion|converter|installation|driver|imager|formatter"),
 )
 
-_FILE = re.compile(r"\.(pdf|zip|step|stp|dxf|dwg|7z|rar|sch|brd|exe|msi)$|/w/upload/", re.I)
+# A few product pages link their wiki relative to the site root instead of absolutely.
+SITE = "https://www.waveshare.com"
+
+_FILE = re.compile(r"\.(pdf|zip|step|stp|dxf|dwg|7z|rar|sch|brd|exe|msi|uf2)$|/w/upload/", re.I)
 
 
 def parse(html: str) -> tuple[Resource, ...]:
@@ -44,6 +48,12 @@ def parse(html: str) -> tuple[Resource, ...]:
 
 
 def _kind(text: str) -> str:
+    """What the link calls it, or `other`.
+
+    `other` is mostly the third-party utilities a tutorial tells you to install — PuTTY,
+    Win32DiskImager, Thonny — which every wiki page links and which say nothing about the
+    product. Naming each of them would be a list to maintain, not a rule.
+    """
     for name, pattern in KINDS:
         if re.search(pattern, text, re.I):
             return name
@@ -51,5 +61,9 @@ def _kind(text: str) -> str:
 
 
 def url_of(wiki_url: str) -> str:
-    """The address to fetch: stored links are `http://`, and the site redirects to TLS."""
-    return re.sub(r"^http://", "https://", wiki_url.strip())
+    """The address to fetch.
+
+    Stored links are inconsistent: most are absolute and `http://`, which the site
+    redirects to TLS, but a handful are written relative to the site root.
+    """
+    return urljoin(SITE, re.sub(r"^http://", "https://", wiki_url.strip()))
