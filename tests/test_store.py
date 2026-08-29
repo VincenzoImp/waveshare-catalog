@@ -183,3 +183,19 @@ def test_registering_never_overwrites_listing_metadata(db: sqlite3.Connection) -
     row = db.execute("SELECT name, price_min FROM products").fetchone()
     assert (row["name"], row["price_min"]) == ("A display", 9.99)
     assert counts(db)["products_unlisted"] == 0
+
+
+def test_a_detail_fills_identifying_gaps_without_overwriting(db: sqlite3.Connection) -> None:
+    """Listing data wins where it exists; the page only fills what is missing."""
+    register_products(db, [URL])
+
+    save_detail(db, replace(DETAIL, name="From the page", part_no="P-9", image="img.jpg"))
+
+    row = db.execute("SELECT name, part_no, image FROM products").fetchone()
+    assert (row["name"], row["part_no"], row["image"]) == ("From the page", "P-9", "img.jpg")
+
+    save_products(db, [PRODUCT])
+    save_detail(db, replace(DETAIL, name="From the page", part_no="P-9"))
+
+    row = db.execute("SELECT name, part_no FROM products").fetchone()
+    assert (row["name"], row["part_no"]) == ("A display", "X-1")

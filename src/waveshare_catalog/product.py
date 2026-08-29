@@ -28,7 +28,37 @@ def parse(url: str, html: str) -> Detail:
         axes=option_axes(html),
         price_min=low,
         price_max=high,
+        name=_name(soup),
+        part_no=_part_no(soup),
+        image=_main_image(soup),
     )
+
+
+def _name(soup: BeautifulSoup) -> str | None:
+    node = soup.select_one(".product-name")
+    if node is None:
+        return None
+    return node.get_text(" ", strip=True) or None
+
+
+def _part_no(soup: BeautifulSoup) -> str | None:
+    """`<span class="product-info-title">Part No.</span>...<span>1.02inch e-Paper</span>`."""
+    for label in soup.select("span.product-info-title"):
+        if "part no" not in label.get_text(strip=True).lower():
+            continue
+        for sibling in label.find_next_siblings("span"):
+            value = sibling.get_text(strip=True)
+            if value and value != ":":
+                return value
+    return None
+
+
+def _main_image(soup: BeautifulSoup) -> str | None:
+    node = soup.select_one(".product-image img[src], img.primary-image[src]")
+    if node is None:
+        return None
+    src = node.get("src")
+    return src if isinstance(src, str) else None
 
 
 def _price_range(soup: BeautifulSoup) -> tuple[float | None, float | None]:

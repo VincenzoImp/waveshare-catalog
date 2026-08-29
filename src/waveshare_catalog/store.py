@@ -85,6 +85,9 @@ class Detail:
     axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
     price_min: float | None = None
     price_max: float | None = None
+    name: str | None = None
+    part_no: str | None = None
+    image: str | None = None
 
 
 @contextmanager
@@ -196,6 +199,13 @@ def save_detail(connection: sqlite3.Connection, detail: Detail) -> None:
             "UPDATE products SET price_min = ?, price_max = ? WHERE url = ?",
             (detail.price_min, detail.price_max, detail.url),
         )
+    # A fifth of the catalogue is in no listing, so for those products the page is the
+    # only source of a name, a Part No and an image. Fill gaps, never overwrite.
+    connection.execute(
+        "UPDATE products SET name = COALESCE(NULLIF(name, ''), ?), "
+        "part_no = COALESCE(NULLIF(part_no, ''), ?), image = COALESCE(image, ?) WHERE url = ?",
+        (detail.name, detail.part_no, detail.image, detail.url),
+    )
     connection.executemany(
         "INSERT INTO variants (product_url, sku, label, attributes_json, unsaleable) "
         "VALUES (?, ?, ?, ?, ?) "

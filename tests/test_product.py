@@ -117,3 +117,41 @@ def test_images_are_limited_to_the_product_itself(product_html: str) -> None:
 
     assert len(detail.images) == 8
     assert all("esp32-s3-touch-lcd-3.5" in image for image in detail.images)
+
+
+def test_reads_the_identifying_fields_from_the_page(product_html: str) -> None:
+    """For the fifth of the catalogue in no listing, the page is the only source of these."""
+    detail = product.parse(URL, product_html)
+
+    assert detail.name is not None and detail.name.startswith("ESP32-S3 3.5inch")
+    assert detail.image is not None and detail.image.endswith(".jpg")
+
+
+def test_reads_a_part_number_when_the_page_carries_one() -> None:
+    html = (
+        '<span class="product-info-title">Part No.</span>'
+        '<span style="opacity: 0;">:</span><span>1.02inch e-Paper</span>'
+    )
+
+    assert product.parse(URL, html).part_no == "1.02inch e-Paper"
+
+
+def test_a_page_without_those_fields_leaves_them_unset() -> None:
+    detail = product.parse(URL, '<span class="product-info-title">Weight</span><span>10g</span>')
+
+    assert detail.name is None
+    assert detail.part_no is None
+    assert detail.image is None
+
+
+def test_an_empty_product_name_is_not_taken() -> None:
+    assert product.parse(URL, '<div class="product-name">  </div>').name is None
+
+
+def test_keeps_looking_when_a_part_number_label_has_no_value() -> None:
+    html = (
+        '<div><span class="product-info-title">Part No.</span><span>:</span></div>'
+        '<div><span class="product-info-title">Part No.</span><span>X-2</span></div>'
+    )
+
+    assert product.parse(URL, html).part_no == "X-2"
