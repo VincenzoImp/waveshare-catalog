@@ -12,14 +12,14 @@ project from a crawler that produces a file into a dataset with a crawler attach
 
 The parser used to flatten each page into one text blob, discarding the structure Waveshare
 publishes. Everything in this section follows from reading the tables instead, and none of it
-needed the network: `reparse` rebuilt the whole catalogue from the existing cache in six
-minutes.
+needed the network: `reparse` rebuilt the whole catalogue from the existing cache, product
+pages and wikis alike, in under ten minutes.
 
-- Specifications are stored as facts. `specs` holds 17,473 key/value rows read from the
+- Specifications are stored as facts. `specs` holds 17,525 key/value rows read from the
   page's own table — display size, resolution, driver IC, touch IC, and the active area in
   millimetres. Keys are kept verbatim next to a normalised form, because the catalogue has
-  no fixed vocabulary: 374 distinct keys appear across 104 sampled pages and the 40
-  commonest cover barely a third of them, so columns would have dropped the tail.
+  no fixed vocabulary: 2,572 distinct keys, of which the 40 commonest cover under a third,
+  so columns would have dropped the tail.
 - The family comparison matrix is a table again, in `family_members` and `family_specs`.
   This is the only cross-reference between products in the catalogue, since categories do
   not link siblings, and it makes "what else is like this, and is it cheaper" a single
