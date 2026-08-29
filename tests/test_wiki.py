@@ -9,6 +9,17 @@ def link(href: str, text: str) -> str:
     return f'<a href="{href}">{text}</a>'
 
 
+def test_reads_the_downloads_of_a_real_wiki_page(wiki_html: str) -> None:
+    """The page the whole feature exists for: a shop page links no files, this links fifteen."""
+    found = {resource.title: resource.kind for resource in wiki.parse(wiki_html)}
+
+    assert found["ESP32-S3-Touch-LCD-3.5 2D & 3D diagram"] == "cad"
+    assert found["ESP32-S3-Touch-LCD-3.5 Schematic diagram"] == "schematic"
+    assert found["ESP32-S3-Touch-LCD-3.5 Demo"] == "demo"
+    assert found["ST7796S Datasheet"] == "datasheet"
+    assert len(found) == 15
+
+
 def test_classifies_downloads_by_what_the_link_calls_them() -> None:
     """Anchor text describes these better than the file name: both of these are PDFs."""
     html = "".join(

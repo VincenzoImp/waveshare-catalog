@@ -31,6 +31,11 @@ def product_html() -> str:
 
 
 @pytest.fixture
+def wiki_html() -> str:
+    return load("wiki-esp32-s3-touch-lcd-3.5.html.gz")
+
+
+@pytest.fixture
 def sitemap_xml() -> str:
     return load("sitemap.xml.gz")
 
