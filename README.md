@@ -19,6 +19,15 @@ $ waveshare-catalog query --name touch --price-max 40 --with-options
 8 products
 ```
 
+## Status
+
+Working and complete for what it sets out to do, maintained casually. The snapshot is
+refreshed now and then rather than on a schedule, and the parsers read Waveshare's HTML, so
+they will break when the site changes: it has happened once already, when Waveshare replaced
+the Magento variant format with its own. When it happens, fixing the parser and running
+`reparse` costs minutes and no network, because every page is cached. Issues get read when
+there is time.
+
 ## Prebuilt snapshot
 
 If you would rather not crawl, the [latest release](https://github.com/VincenzoImp/waveshare-catalog/releases/latest)

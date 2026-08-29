@@ -25,7 +25,22 @@ MAX_PAGES = 200
 COMMIT_EVERY = 25
 
 
+def _shared_arguments() -> argparse.ArgumentParser:
+    """The options every command takes, so they work before or after the command name.
+
+    The defaults live on the top-level parser alone: with a default here too, argparse
+    would write it over a value the user already gave before the subcommand.
+    """
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--db", type=Path, default=argparse.SUPPRESS, help="SQLite file to use")
+    shared.add_argument(
+        "--cache", type=Path, default=argparse.SUPPRESS, help="page cache directory"
+    )
+    return shared
+
+
 def build_parser() -> argparse.ArgumentParser:
+    shared = _shared_arguments()
     parser = argparse.ArgumentParser(
         prog="waveshare-catalog",
         description="Collect the Waveshare catalogue locally, then query it offline.",
@@ -35,7 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="page cache directory")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sync = sub.add_parser("sync", help="register every product and read the root listing")
+    sync = sub.add_parser(
+        "sync", parents=[shared], help="register every product and read the root listing"
+    )
     sync.add_argument("--delay", type=float, help="seconds between requests, overriding robots.txt")
     sync.add_argument(
         "--with-categories",
@@ -44,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sync.add_argument("--limit-categories", type=int, help="stop after this many categories")
 
-    detail = sub.add_parser("detail", help="fetch full product pages")
+    detail = sub.add_parser("detail", parents=[shared], help="fetch full product pages")
     detail.add_argument("--url", action="append", default=[], help="product URL, repeatable")
     detail.add_argument("--name", help="instead of --url, take every product matching this name")
     detail.add_argument(
@@ -53,15 +70,19 @@ def build_parser() -> argparse.ArgumentParser:
     detail.add_argument("--limit", type=int, help="cap how many products are fetched")
     detail.add_argument("--delay", type=float, help="seconds between requests")
 
-    find = sub.add_parser("query", help="filter the local catalogue")
+    find = sub.add_parser("query", parents=[shared], help="filter the local catalogue")
     _add_filter_arguments(find)
 
-    out = sub.add_parser("export", help="write query results to stdout")
+    out = sub.add_parser("export", parents=[shared], help="write query results to stdout")
     out.add_argument("--format", choices=("csv", "jsonl"), default="csv")
     _add_filter_arguments(out)
 
-    sub.add_parser("reparse", help="re-run the parsers over cached pages, without network")
-    sub.add_parser("stats", help="show how much of the catalogue is collected")
+    sub.add_parser(
+        "reparse",
+        parents=[shared],
+        help="re-run the parsers over cached pages, without network",
+    )
+    sub.add_parser("stats", parents=[shared], help="show how much of the catalogue is collected")
     return parser
 
 

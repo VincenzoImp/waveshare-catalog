@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `--db` and `--cache` are accepted either before or after the subcommand, instead of only
+  before it.
+
 ## 0.1.0
 
 First release.

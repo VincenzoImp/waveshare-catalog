@@ -393,3 +393,34 @@ def test_a_long_detail_run_commits_as_it_goes(
     run(workspace, "detail", "--url", PRODUCT_URL, "--url", ORPHAN_URL)
 
     assert seen_by_another_connection == [1]
+
+
+def test_paths_are_accepted_after_the_subcommand(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Almost every CLI takes its global options either side of the command name."""
+    assert cli.main(["stats", "--db", str(workspace / "after.db")]) == 0
+
+    assert "products" in capsys.readouterr().out
+    assert (workspace / "after.db").exists()
+
+
+def test_a_path_given_before_the_subcommand_still_wins(workspace: Path) -> None:
+    """Regression: a default on the subparser would silently overwrite this one."""
+    chosen = workspace / "before.db"
+
+    assert cli.main(["--db", str(chosen), "stats"]) == 0
+    assert chosen.exists()
+
+    parsed = cli.build_parser().parse_args(["--db", str(chosen), "stats"])
+    assert parsed.db == chosen
+
+
+def test_the_cache_path_works_in_both_positions(workspace: Path) -> None:
+    args = cli.build_parser().parse_args(["--cache", "x", "sync"])
+    assert args.cache == Path("x")
+
+    args = cli.build_parser().parse_args(["sync", "--cache", "y"])
+    assert args.cache == Path("y")
+
+    assert cli.build_parser().parse_args(["sync"]).cache == cli.DEFAULT_CACHE
