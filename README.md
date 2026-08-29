@@ -19,6 +19,23 @@ $ waveshare-catalog query --name touch --price-max 40 --with-options
 8 products
 ```
 
+## Prebuilt snapshot
+
+If you would rather not crawl, the [latest release](https://github.com/VincenzoImp/waveshare-catalog/releases/latest)
+carries a ready database, 2.9 MB compressed:
+
+```bash
+curl -LO https://github.com/VincenzoImp/waveshare-catalog/releases/latest/download/waveshare-catalog-2026-08-29.db.gz
+gunzip waveshare-catalog-2026-08-29.db.gz && mv waveshare-catalog-*.db waveshare.db
+waveshare-catalog query --name touch --price-max 40
+```
+
+It holds all 2,350 products with their pages fetched: prices, 2,543 variants across 613
+products, wiki links and descriptions. Two caveats. It is a snapshot taken on 2026-08-29, so
+prices and availability drift; re-run `sync` and `detail --all` for current data. And the
+product text in it belongs to Waveshare: it is bundled so you can query the catalogue, not
+as content to republish.
+
 ## Install
 
 ```bash
