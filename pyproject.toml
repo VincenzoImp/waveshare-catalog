@@ -16,6 +16,12 @@ dependencies = ["httpx>=0.28", "beautifulsoup4>=4.13", "lxml>=5.3"]
 
 [project.scripts]
 waveshare-catalog = "waveshare_catalog.cli:main"
+waveshare-catalog-mcp = "waveshare_catalog.mcp_server:main"
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=2,<3",
+]
 
 [dependency-groups]
 dev = [
@@ -24,6 +30,7 @@ dev = [
     "pytest>=9.1",
     "pytest-cov>=7",
     "types-beautifulsoup4",
+    "mcp>=2,<3",
 ]
 
 [tool.hatch.version]
@@ -51,6 +58,9 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Waveshare writes every resolution with a real multiplication sign, "320 × 480", so it
+# appears verbatim in parsed values and in the tests that pin them.
+allowed-confusables = ["×"]
 
 [tool.mypy]
 python_version = "3.11"

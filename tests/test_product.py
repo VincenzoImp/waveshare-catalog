@@ -23,6 +23,30 @@ def test_reads_the_option_axes(product_html: str) -> None:
     assert axes["Version Options"] == ("with case and OV5640 camera", "without case")
 
 
+def test_the_description_no_longer_carries_the_family_matrix(product_html: str) -> None:
+    """The page tabulates 87 sibling models inside the description; only prose should remain.
+
+    Left in, a text search for "with case" answered about whichever sibling had one.
+    """
+    detail = product.parse(URL, product_html)
+
+    assert "√" not in detail.description
+    assert "ESP32-S3-Touch-AMOLED-2.41" not in detail.description
+    assert detail.description.startswith("ESP32-S3 3.5inch Capacitive Touch Display")
+
+
+def test_the_specifications_reach_the_detail(product_html: str) -> None:
+    detail = product.parse(URL, product_html)
+
+    assert {s.key_norm: s.value for s in detail.specs}["driver ic"] == "ST7796"
+
+
+def test_the_family_matrix_reaches_the_detail(product_html: str) -> None:
+    detail = product.parse(URL, product_html)
+
+    assert len({row.model for row in detail.family}) == 87
+
+
 def test_reads_the_wiki_link_and_images(product_html: str) -> None:
     detail = product.parse(URL, product_html)
 

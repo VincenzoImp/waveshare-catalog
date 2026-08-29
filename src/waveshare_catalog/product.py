@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 
 from bs4 import BeautifulSoup
 
-from waveshare_catalog.store import Detail, Variant
+from waveshare_catalog import tables
+from waveshare_catalog.store import Detail, FamilyRow, Spec, Variant
 
 # The variant blob is Waveshare's own, not Magento's `spConfig`, and its SKU key
 # carries a trailing space: {"sku ": "30733", "attributes": [...], ...}.
@@ -19,6 +21,7 @@ def parse(url: str, html: str) -> Detail:
     """Everything the product page adds on top of the listing row."""
     soup = BeautifulSoup(html, "lxml")
     low, high = _price_range(soup)
+    pairs, family = tables.read(soup)
     return Detail(
         url=url,
         description=_description(soup),
@@ -26,6 +29,8 @@ def parse(url: str, html: str) -> Detail:
         images=_images(soup, url),
         variants=_variants(html),
         axes=option_axes(html),
+        specs=tuple(Spec(key=key, value=value) for key, value in pairs),
+        family=tuple(FamilyRow(model=m, key=k, value=v) for m, k, v in family),
         price_min=low,
         price_max=high,
         name=_name(soup),
@@ -138,8 +143,21 @@ def _sku_of(entry: dict[str, object]) -> str | None:
 
 
 def _description(soup: BeautifulSoup) -> str:
+    """The product's own prose, with every table removed.
+
+    Most descriptions embed the comparison matrix of the whole product family, so the
+    flattened text used to state a dozen siblings' specifications as if they were this
+    product's. The tables are read separately by `tables.read`; here they are dropped so
+    that what remains means one thing. The node is copied first because the rest of the
+    parse still needs the original.
+    """
     node = soup.select_one("div.product-description, div.std, div.short-description")
-    return node.get_text(" ", strip=True) if node is not None else ""
+    if node is None:
+        return ""
+    prose = copy.copy(node)
+    for table in prose.find_all("table"):
+        table.decompose()
+    return prose.get_text(" ", strip=True)
 
 
 def _wiki_url(soup: BeautifulSoup) -> str | None:

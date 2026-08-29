@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS categories (
@@ -27,14 +27,48 @@ CREATE TABLE IF NOT EXISTS product_categories (
 
 CREATE TABLE IF NOT EXISTS details (
     product_url TEXT PRIMARY KEY, description TEXT, axes_json TEXT,
-    wiki_url TEXT, images_json TEXT, fetched_at TEXT, parser_version INTEGER);
+    wiki_url TEXT, images_json TEXT, fetched_at TEXT, parser_version INTEGER,
+    wiki_fetched_at TEXT);
 
 CREATE TABLE IF NOT EXISTS variants (
     product_url TEXT, sku TEXT, label TEXT, attributes_json TEXT,
     unsaleable INTEGER, PRIMARY KEY (product_url, sku));
 
+-- One row per fact the page states about the product, key kept verbatim. The catalogue
+-- has no fixed vocabulary: 2,570 distinct keys across the whole of it, of which the 40
+-- commonest cover under a third, so columns would silently drop the tail. `value` is part
+-- of the key because a page may legitimately state one key twice.
+CREATE TABLE IF NOT EXISTS specs (
+    product_url TEXT, key TEXT, key_norm TEXT, value TEXT, source TEXT,
+    PRIMARY KEY (product_url, key, value, source));
+
+-- Which sibling models a page's comparison matrix lists. This is the only cross-reference
+-- between products in the catalogue, since categories do not link siblings, so it is what
+-- makes "what else is like this?" answerable.
+CREATE TABLE IF NOT EXISTS family_members (
+    product_url TEXT, model TEXT,
+    PRIMARY KEY (product_url, model));
+
+-- What those matrices say about each model, deduplicated across pages. The same matrix is
+-- reprinted on every page of a family, so keeping it per page cost 545,688 rows to state
+-- fewer than 10,000 facts, and grew the file eightfold. Pages disagree about a model 327
+-- times, mostly over punctuation or how a page groups its columns, and `value` is part of
+-- the key so every reading survives rather than the last one winning.
+CREATE TABLE IF NOT EXISTS family_specs (
+    model TEXT, key TEXT, value TEXT,
+    PRIMARY KEY (model, key, value));
+
+-- Files the product's wiki page links: CAD geometry, schematics, component datasheets and
+-- demo code. The shop page links none of these, so the wiki is their only source.
+CREATE TABLE IF NOT EXISTS resources (
+    product_url TEXT, kind TEXT, url TEXT, title TEXT,
+    PRIMARY KEY (product_url, url));
+
+CREATE INDEX IF NOT EXISTS idx_resources_kind ON resources(kind);
 CREATE INDEX IF NOT EXISTS idx_variants_product ON variants(product_url);
 CREATE INDEX IF NOT EXISTS idx_prodcat_category ON product_categories(category_url);
+CREATE INDEX IF NOT EXISTS idx_specs_keynorm ON specs(key_norm);
+CREATE INDEX IF NOT EXISTS idx_family_members_model ON family_members(model);
 """
 
 # Columns introduced after a release. `CREATE TABLE IF NOT EXISTS` leaves an existing
@@ -42,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_prodcat_category ON product_categories(category_u
 # version. SQLite can add a column but not drop one, which is all this needs.
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "products": {"has_options": "INTEGER DEFAULT 0"},
-    "details": {"axes_json": "TEXT"},
+    "details": {"axes_json": "TEXT", "wiki_fetched_at": "TEXT"},
 }
 
 
@@ -74,6 +108,37 @@ class Variant:
 
 
 @dataclass(frozen=True, slots=True)
+class Spec:
+    """One key/value the page states about this product, as written."""
+
+    key: str
+    value: str
+    source: str = "product_page"
+
+    @property
+    def key_norm(self) -> str:
+        return " ".join(self.key.lower().split())
+
+
+@dataclass(frozen=True, slots=True)
+class FamilyRow:
+    """One cell of the comparison matrix a page prints for its product family."""
+
+    model: str
+    key: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class Resource:
+    """A file the product's wiki page offers for download."""
+
+    kind: str
+    url: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
 class Detail:
     """What a product page adds on top of its listing row."""
 
@@ -83,6 +148,8 @@ class Detail:
     images: tuple[str, ...]
     variants: tuple[Variant, ...]
     axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    specs: tuple[Spec, ...] = ()
+    family: tuple[FamilyRow, ...] = ()
     price_min: float | None = None
     price_max: float | None = None
     name: str | None = None
@@ -222,11 +289,64 @@ def save_detail(connection: sqlite3.Connection, detail: Detail) -> None:
             for v in detail.variants
         ],
     )
+    # Replaced rather than merged: a parser fix that stops emitting a wrong row must not
+    # leave that row behind after `reparse`.
+    connection.execute(
+        "DELETE FROM specs WHERE product_url = ? AND source = 'product_page'", (detail.url,)
+    )
+    connection.executemany(
+        "INSERT OR REPLACE INTO specs (product_url, key, key_norm, value, source) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(detail.url, s.key, s.key_norm, s.value, s.source) for s in detail.specs],
+    )
+    connection.execute("DELETE FROM family_members WHERE product_url = ?", (detail.url,))
+    connection.executemany(
+        "INSERT OR IGNORE INTO family_members (product_url, model) VALUES (?, ?)",
+        [(detail.url, model) for model in dict.fromkeys(f.model for f in detail.family)],
+    )
+    # Not scoped to this page, because the matrix describes the family rather than the page
+    # that happens to print it. `reparse` rebuilds the table from scratch, which is where a
+    # row left behind by a corrected parser gets cleared.
+    connection.executemany(
+        "INSERT OR IGNORE INTO family_specs (model, key, value) VALUES (?, ?, ?)",
+        [(f.model, f.key, f.value) for f in detail.family],
+    )
+
+
+def save_resources(
+    connection: sqlite3.Connection, product_url: str, resources: Iterable[Resource]
+) -> int:
+    """Record what a product's wiki offers, and that its wiki has now been read.
+
+    The timestamp is written even when the page links nothing, so that `--all` does not
+    keep returning to a wiki that simply has no downloads.
+    """
+    rows = list(resources)
+    connection.execute("DELETE FROM resources WHERE product_url = ?", (product_url,))
+    connection.executemany(
+        "INSERT OR REPLACE INTO resources (product_url, kind, url, title) VALUES (?, ?, ?, ?)",
+        [(product_url, r.kind, r.url, r.title) for r in rows],
+    )
+    connection.execute(
+        "UPDATE details SET wiki_fetched_at = ? WHERE product_url = ?",
+        (datetime.now(UTC).isoformat(timespec="seconds"), product_url),
+    )
+    return len(rows)
 
 
 def counts(connection: sqlite3.Connection) -> dict[str, int]:
     """Row counts per table, for `stats`."""
-    tables = ("categories", "products", "product_categories", "details", "variants")
+    tables = (
+        "categories",
+        "products",
+        "product_categories",
+        "details",
+        "variants",
+        "specs",
+        "family_members",
+        "family_specs",
+        "resources",
+    )
     counted = {
         table: int(connection.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"])
         for table in tables
@@ -241,6 +361,13 @@ def counts(connection: sqlite3.Connection) -> dict[str, int]:
     counted["details_outdated"] = int(
         connection.execute(
             "SELECT count(*) AS n FROM details WHERE parser_version < ?", (PARSER_VERSION,)
+        ).fetchone()["n"]
+    )
+    # Products with a wiki that has not been read yet, which is what `wiki --all` collects.
+    counted["wikis_pending"] = int(
+        connection.execute(
+            "SELECT count(*) AS n FROM details WHERE wiki_url IS NOT NULL AND wiki_url != '' "
+            "AND wiki_fetched_at IS NULL"
         ).fetchone()["n"]
     )
     return counted

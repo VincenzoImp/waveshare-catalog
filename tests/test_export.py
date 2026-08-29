@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from waveshare_catalog.export import to_csv, to_jsonl
+from waveshare_catalog.export import rows_to_csv, rows_to_jsonl, to_csv, to_jsonl
 from waveshare_catalog.store import Product, save_products
 
 PRODUCT = Product(
@@ -55,4 +55,19 @@ def test_empty_results_produce_no_jsonl() -> None:
     stream = io.StringIO()
 
     assert to_jsonl([], stream) == 0
+    assert stream.getvalue() == ""
+
+
+def test_an_arbitrary_query_writes_no_csv_header_when_it_found_nothing() -> None:
+    """`export` has a fixed column list; a free-form query only knows its shape from the rows."""
+    stream = io.StringIO()
+
+    assert rows_to_csv([], stream) == 0
+    assert stream.getvalue() == ""
+
+
+def test_an_arbitrary_query_writes_no_jsonl_when_it_found_nothing() -> None:
+    stream = io.StringIO()
+
+    assert rows_to_jsonl([], stream) == 0
     assert stream.getvalue() == ""

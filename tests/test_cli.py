@@ -35,10 +35,32 @@ LISTING_HTML = """
 </div></li></ul>
 """
 
+# Real pages print a comparison matrix of the whole product family, which is the only
+# cross-reference between products in the catalogue.
+FAMILY_TABLE = (
+    "<table><tr><td>Model</td><td>CPU</td><td>a</td><td>b</td><td>c</td><td>d</td></tr>"
+    + "".join(
+        f"<tr><td>Sibling-{n}</td><td>ESP32</td><td>a</td><td>b</td><td>c</td><td>d</td></tr>"
+        for n in range(4)
+    )
+    + "</table>"
+)
+
+WIKI_URL = "https://www.waveshare.com/wiki/A"
+WIKI_HTML = (
+    '<a href="https://files.waveshare.com/wiki/A/A-2Dand3D.zip">A 2D &amp; 3D diagram</a>'
+    '<a href="/wiki/Elsewhere">not a file</a>'
+)
+
+WIKI_URL_2 = "https://www.waveshare.com/wiki/Orphan"
+
 PRODUCT_HTML = (
     "<script>var waveshare_sku_attributes = "
     '[{"sku ":"1","attributes":["with case"],"unsaleable":false}];</script>'
+    f'<a href="{WIKI_URL}">wiki</a>' + FAMILY_TABLE
 )
+
+ORPHAN_HTML = PRODUCT_HTML.replace(WIKI_URL, WIKI_URL_2)
 
 PAGES = {
     ROBOTS: (200, "User-agent: *\nCrawl-delay: 60\n"),
@@ -46,7 +68,9 @@ PAGES = {
     f"{ROOT}?limit=80&p=1": (200, LISTING_HTML),
     f"{CATEGORY}?limit=80&p=1": (200, LISTING_HTML),
     PRODUCT_URL: (200, PRODUCT_HTML),
-    ORPHAN_URL: (200, PRODUCT_HTML),
+    ORPHAN_URL: (200, ORPHAN_HTML),
+    WIKI_URL: (200, WIKI_HTML),
+    WIKI_URL_2: (200, WIKI_HTML),
 }
 
 
@@ -181,6 +205,101 @@ def test_reparse_replays_the_cache_without_network(
 
     assert run(workspace, "reparse") == 0
     assert "reparsed 1 products" in capsys.readouterr().out
+
+
+def test_wiki_records_the_files_a_product_page_never_links(workspace: Path) -> None:
+    run(workspace, "detail", "--url", PRODUCT_URL)
+
+    assert run(workspace, "wiki", "--all") == 0
+
+    found = rows(workspace, "SELECT kind, title FROM resources")
+    assert [(r["kind"], r["title"]) for r in found] == [("cad", "A 2D & 3D diagram")]
+
+
+def test_wiki_all_does_not_return_to_a_page_it_has_read(workspace: Path) -> None:
+    """The timestamp is written even for a wiki with no downloads, or `--all` would loop."""
+    run(workspace, "detail", "--url", PRODUCT_URL)
+    run(workspace, "wiki", "--all")
+
+    assert run(workspace, "wiki", "--all") == 1, "nothing left to fetch"
+
+
+def test_wiki_selects_by_name_and_by_url(workspace: Path) -> None:
+    run(workspace, "sync")
+    run(workspace, "detail", "--all")
+
+    assert run(workspace, "wiki", "--name", "display", "--limit", "1") == 0
+    assert run(workspace, "wiki", "--url", PRODUCT_URL) == 0
+
+
+def test_wiki_reports_a_page_it_could_not_fetch(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(workspace, "detail", "--url", PRODUCT_URL)
+    PAGES[WIKI_URL] = (404, "gone")
+    try:
+        assert run(workspace, "wiki", "--all") == 1
+    finally:
+        PAGES[WIKI_URL] = (200, WIKI_HTML)
+    assert "returned HTTP 404" in capsys.readouterr().out
+
+
+def test_sql_answers_a_query_in_each_format(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(workspace, "sync")
+
+    for style, expected in (("table", "part_no"), ("csv", "part_no"), ("jsonl", '"part_no"')):
+        assert run(workspace, "sql", "SELECT part_no FROM products", "--format", style) == 0
+        assert expected in capsys.readouterr().out
+
+
+def test_sql_refuses_to_write(workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Read-only is a property of how the file is opened, not a pattern match on the text."""
+    run(workspace, "sync")
+
+    assert run(workspace, "sql", "DELETE FROM products") == 1
+    assert "readonly database" in capsys.readouterr().out
+
+
+def test_sql_reports_a_broken_query(workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    run(workspace, "sync")
+
+    assert run(workspace, "sql", "SELECT nope FROM products") == 1
+    assert "sql: " in capsys.readouterr().out
+
+
+def test_sql_says_so_when_there_is_no_database(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(workspace, "sql", "SELECT 1") == 1
+    assert "no database at" in capsys.readouterr().out
+
+
+def test_sql_prints_nothing_found_rather_than_an_empty_table(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(workspace, "sync")
+
+    assert run(workspace, "sql", "SELECT * FROM products WHERE url = 'nowhere'") == 0
+    assert "no rows" in capsys.readouterr().out
+
+
+def test_reparse_clears_family_facts_a_corrected_parser_no_longer_states(
+    workspace: Path,
+) -> None:
+    """`family_specs` is keyed by model, so no per-page write can retract a stale row."""
+    run(workspace, "detail", "--url", PRODUCT_URL)
+    with open_db(workspace / "db.sqlite") as connection:
+        connection.execute(
+            "INSERT INTO family_specs (model, key, value) VALUES ('Ghost', 'Wrong', '1')"
+        )
+
+    assert run(workspace, "reparse") == 0
+
+    models = {row["model"] for row in rows(workspace, "SELECT model FROM family_specs")}
+    assert "Ghost" not in models
+    assert "Sibling-0" in models, "the matrix the page really prints survives the rebuild"
 
 
 def test_reparse_skips_products_missing_from_the_cache(
@@ -395,6 +514,38 @@ def test_a_long_detail_run_commits_as_it_goes(
     assert seen_by_another_connection == [1]
 
 
+def test_a_long_wiki_run_commits_as_it_goes(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """1,662 wikis is over an hour of fetching, so the same guarantee has to hold here."""
+    seen_by_another_connection: list[int] = []
+
+    class Watching(FakeClient):
+        def get(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+            if url == WIKI_URL_2:  # the second wiki: look at what the first one left behind
+                other = sqlite3.connect(workspace / "db.sqlite")
+                try:
+                    seen_by_another_connection.append(
+                        other.execute("SELECT count(*) FROM resources").fetchone()[0]
+                    )
+                finally:
+                    other.close()
+            return super().get(url, headers)
+
+    run(workspace, "sync")
+    run(workspace, "detail", "--all")
+    monkeypatch.setattr(cli, "COMMIT_EVERY", 1)
+    monkeypatch.setattr(
+        cli,
+        "_fetcher",
+        lambda args, delay: Fetcher(Watching(PAGES), Cache(workspace / "c7"), delay=0),
+    )
+
+    run(workspace, "wiki", "--all")
+
+    assert seen_by_another_connection == [1], "the first wiki was durable before the second ran"
+
+
 def test_paths_are_accepted_after_the_subcommand(
     workspace: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -424,3 +575,41 @@ def test_the_cache_path_works_in_both_positions(workspace: Path) -> None:
     assert args.cache == Path("y")
 
     assert cli.build_parser().parse_args(["sync"]).cache == cli.DEFAULT_CACHE
+
+
+def test_reparse_also_reclassifies_wiki_downloads(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Wiki pages sit in the same cache, so a fix to their parser must cost no network either."""
+    run(workspace, "detail", "--url", PRODUCT_URL)
+    run(workspace, "wiki", "--all")
+    with open_db(workspace / "db.sqlite") as connection:
+        connection.execute("UPDATE resources SET kind = 'wrong'")
+    capsys.readouterr()
+
+    assert run(workspace, "reparse") == 0
+
+    assert "reparsed 1 wikis" in capsys.readouterr().out
+    assert [r["kind"] for r in rows(workspace, "SELECT kind FROM resources")] == ["cad"]
+
+
+def test_reparse_skips_a_wiki_missing_from_the_cache(workspace: Path) -> None:
+    run(workspace, "detail", "--url", PRODUCT_URL)
+    run(workspace, "wiki", "--all")
+    for path in (workspace / "cache").rglob("*.html.gz"):
+        path.unlink()
+
+    assert run(workspace, "reparse") == 0
+
+
+def test_wiki_url_naming_a_product_without_one_finds_nothing(
+    workspace: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Not every product has a wiki; asking for one should say so, not raise."""
+    with open_db(workspace / "db.sqlite") as connection:
+        connection.execute(
+            "INSERT INTO details (product_url, wiki_url) VALUES (?, NULL)", (PRODUCT_URL,)
+        )
+
+    assert run(workspace, "wiki", "--url", PRODUCT_URL) == 1
+    assert "no wikis to fetch" in capsys.readouterr().out

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from waveshare_catalog import __version__, export, listing, product, query, sitemap, store
+from waveshare_catalog import __version__, export, listing, product, query, sitemap, store, wiki
 from waveshare_catalog.fetcher import Cache, Fetcher, FetchError, HttpxClient
 
 DEFAULT_DB = Path("waveshare.db")
@@ -70,12 +70,29 @@ def build_parser() -> argparse.ArgumentParser:
     detail.add_argument("--limit", type=int, help="cap how many products are fetched")
     detail.add_argument("--delay", type=float, help="seconds between requests")
 
+    pages = sub.add_parser(
+        "wiki", parents=[shared], help="fetch product wikis for the files they link"
+    )
+    pages.add_argument("--url", action="append", default=[], help="product URL, repeatable")
+    pages.add_argument("--name", help="instead of --url, take every product matching this name")
+    pages.add_argument(
+        "--all", action="store_true", help="every product whose wiki has not been read yet"
+    )
+    pages.add_argument("--limit", type=int, help="cap how many wikis are fetched")
+    pages.add_argument("--delay", type=float, help="seconds between requests")
+
     find = sub.add_parser("query", parents=[shared], help="filter the local catalogue")
     _add_filter_arguments(find)
 
     out = sub.add_parser("export", parents=[shared], help="write query results to stdout")
     out.add_argument("--format", choices=("csv", "jsonl"), default="csv")
     _add_filter_arguments(out)
+
+    ask = sub.add_parser(
+        "sql", parents=[shared], help="run a read-only query against the catalogue"
+    )
+    ask.add_argument("statement", help="any SELECT; the database is opened read-only")
+    ask.add_argument("--format", choices=("table", "csv", "jsonl"), default="table")
 
     sub.add_parser(
         "reparse",
@@ -200,6 +217,62 @@ def run_detail(
     return 1 if failures else 0
 
 
+def run_wiki(
+    fetcher: Fetcher,
+    connection: sqlite3.Connection,
+    targets: Sequence[tuple[str, str]],
+    out: TextIO,
+) -> int:
+    """Read each product's wiki page and record the files it links."""
+    failures = 0
+    for position, (product_url, wiki_url) in enumerate(targets, start=1):
+        progress = f"[{position}/{len(targets)}{_eta(fetcher, len(targets) - position)}]"
+        try:
+            page = fetcher.get(wiki.url_of(wiki_url))
+        except FetchError as error:
+            print(f"  {progress} {wiki_url}: {error}", file=out)
+            failures += 1
+            continue
+        found = store.save_resources(connection, product_url, wiki.parse(page.text))
+        if position % COMMIT_EVERY == 0:
+            connection.commit()
+        print(f"  {progress} {wiki_url} -> {found} files", file=out)
+    return 1 if failures else 0
+
+
+def _wiki_targets(
+    connection: sqlite3.Connection, args: argparse.Namespace
+) -> list[tuple[str, str]]:
+    """The (product, wiki) pairs a run should visit, in catalogue order."""
+    # Every branch requires a wiki to exist: naming a product that has none is not an error
+    # worth a traceback, it simply leaves nothing to fetch.
+    if args.url:
+        wanted = ", ".join("?" * len(args.url))
+        sql = (
+            f"SELECT product_url, wiki_url FROM details WHERE product_url IN ({wanted})"
+            " AND wiki_url IS NOT NULL AND wiki_url != ''"
+        )
+        parameters: list[object] = list(args.url)
+    else:
+        # Not joined to `products` unless a name is being matched: a page can have been
+        # fetched for a URL the listings never named, and its wiki is still worth reading.
+        sql = "SELECT d.product_url, d.wiki_url FROM details d"
+        parameters = []
+        if args.name:
+            sql += " JOIN products p ON p.url = d.product_url"
+        sql += " WHERE d.wiki_url IS NOT NULL AND d.wiki_url != ''"
+        if args.all:
+            sql += " AND d.wiki_fetched_at IS NULL"
+        if args.name:
+            sql += " AND lower(p.name) LIKE ?"
+            parameters.append(f"%{args.name.lower()}%")
+        sql += " ORDER BY d.product_url"
+    if args.limit is not None:
+        sql += " LIMIT ?"
+        parameters.append(args.limit)
+    return [(row["product_url"], row["wiki_url"]) for row in connection.execute(sql, parameters)]
+
+
 def _eta(fetcher: Fetcher, remaining: int) -> str:
     """Rough time left, which matters when a run is measured in hours."""
     delay = fetcher.delay
@@ -212,7 +285,11 @@ def _eta(fetcher: Fetcher, remaining: int) -> str:
 
 
 def run_reparse(cache: Cache, connection: sqlite3.Connection, out: TextIO) -> int:
-    """Re-run the product parser over pages already on disk."""
+    """Re-run the parsers over every page already on disk, product pages and wikis alike."""
+    # `family_specs` is keyed by model rather than by page, so nothing else can clear a row
+    # a corrected parser no longer produces. Reparsing covers every cached page, so this is
+    # the one place the table can safely be rebuilt from nothing.
+    connection.execute("DELETE FROM family_specs")
     reparsed = 0
     for row in connection.execute("SELECT product_url FROM details").fetchall():
         url = row["product_url"]
@@ -222,6 +299,18 @@ def run_reparse(cache: Cache, connection: sqlite3.Connection, out: TextIO) -> in
         store.save_detail(connection, product.parse(url, text))
         reparsed += 1
     print(f"reparsed {reparsed} products from cache", file=out)
+
+    wikis = 0
+    for row in connection.execute(
+        "SELECT product_url, wiki_url FROM details"
+        " WHERE wiki_url IS NOT NULL AND wiki_url != '' AND wiki_fetched_at IS NOT NULL"
+    ).fetchall():
+        text = cache.read(wiki.url_of(row["wiki_url"]))
+        if text is None:
+            continue
+        store.save_resources(connection, row["product_url"], wiki.parse(text))
+        wikis += 1
+    print(f"reparsed {wikis} wikis from cache", file=out)
     return 0
 
 
@@ -241,8 +330,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
 
+def run_sql(path: Path, statement: str, style: str, out: TextIO) -> int:
+    """Answer one query against a read-only connection.
+
+    Read-only is enforced by how the file is opened rather than by inspecting the
+    statement, so there is no pattern to slip past. Whatever the caller asks for that
+    would write simply fails.
+    """
+    if not path.exists():
+        print(f"no database at {path}", file=out)
+        return 1
+    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(statement).fetchall()
+    except sqlite3.Error as error:
+        print(f"sql: {error}", file=out)
+        return 1
+    finally:
+        connection.close()
+    writer = {
+        "csv": export.rows_to_csv,
+        "jsonl": export.rows_to_jsonl,
+        "table": export.rows_to_table,
+    }[style]
+    writer(rows, out)
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     out = sys.stdout
+    if args.command == "sql":
+        # Handled before `open_db`, which would otherwise create and migrate the file.
+        return run_sql(args.db, args.statement, args.format, out)
     with store.open_db(args.db) as connection:
         if args.command == "sync":
             with _fetcher(args, args.delay) as fetcher:
@@ -265,6 +385,13 @@ def _dispatch(args: argparse.Namespace) -> int:
                 return 1
             with _fetcher(args, args.delay) as fetcher:
                 return run_detail(fetcher, connection, urls, out)
+        if args.command == "wiki":
+            targets = _wiki_targets(connection, args)
+            if not targets:
+                print("no wikis to fetch: pass --url, --name or --all", file=out)
+                return 1
+            with _fetcher(args, args.delay) as fetcher:
+                return run_wiki(fetcher, connection, targets, out)
         if args.command == "query":
             rows = query.search(connection, _filter_from(args))
             for row in rows:

@@ -9,7 +9,10 @@ from pathlib import Path
 
 from waveshare_catalog.store import (
     Detail,
+    FamilyRow,
     Product,
+    Resource,
+    Spec,
     Variant,
     counts,
     open_db,
@@ -17,6 +20,7 @@ from waveshare_catalog.store import (
     save_categories,
     save_detail,
     save_products,
+    save_resources,
 )
 
 URL = "https://www.waveshare.com/x.htm"
@@ -97,6 +101,82 @@ def test_saving_a_detail_twice_updates_it(db: sqlite3.Connection) -> None:
     assert counts(db)["variants"] == 1
 
 
+def test_saves_specifications_with_a_normalised_key(db: sqlite3.Connection) -> None:
+    save_products(db, [PRODUCT])
+
+    save_detail(db, replace(DETAIL, specs=(Spec(key="Display Size", value="3.5 inch"),)))
+
+    row = db.execute("SELECT * FROM specs").fetchone()
+    assert (row["key"], row["key_norm"], row["value"]) == (
+        "Display Size",
+        "display size",
+        "3.5 inch",
+    )
+    assert row["source"] == "product_page"
+
+
+def test_saves_the_family_matrix_split_from_the_page_that_prints_it(
+    db: sqlite3.Connection,
+) -> None:
+    """The matrix describes the family, so the page only contributes the membership edge."""
+    save_products(db, [PRODUCT])
+
+    save_detail(
+        db,
+        replace(
+            DETAIL,
+            family=(
+                FamilyRow(model="Y-2", key="PSRAM", value="8MB"),
+                FamilyRow(model="Y-2", key="Flash", value="16MB"),
+            ),
+        ),
+    )
+
+    assert [dict(r) for r in db.execute("SELECT * FROM family_members")] == [
+        {"product_url": URL, "model": "Y-2"}
+    ]
+    assert {(r["key"], r["value"]) for r in db.execute("SELECT * FROM family_specs")} == {
+        ("PSRAM", "8MB"),
+        ("Flash", "16MB"),
+    }
+
+
+def test_the_same_matrix_printed_on_two_pages_is_stored_once(db: sqlite3.Connection) -> None:
+    """Every page of a family reprints the whole matrix; storing it per page cost 8x the file."""
+    row = FamilyRow(model="Y-2", key="PSRAM", value="8MB")
+    save_detail(db, replace(DETAIL, family=(row,)))
+
+    save_detail(db, replace(DETAIL, url=URL + "?other", family=(row,)))
+
+    assert counts(db)["family_specs"] == 1
+    assert counts(db)["family_members"] == 2
+
+
+def test_reparsing_replaces_facts_rather_than_adding_to_them(db: sqlite3.Connection) -> None:
+    """A parser fix that stops emitting a wrong row must not leave that row behind."""
+    save_products(db, [PRODUCT])
+    save_detail(
+        db,
+        replace(
+            DETAIL,
+            specs=(Spec(key="Wrong", value="1"),),
+            family=(FamilyRow(model="Gone", key="Wrong", value="1"),),
+        ),
+    )
+
+    save_detail(
+        db,
+        replace(
+            DETAIL,
+            specs=(Spec(key="Right", value="2"),),
+            family=(FamilyRow(model="Kept", key="Right", value="2"),),
+        ),
+    )
+
+    assert [row["key"] for row in db.execute("SELECT key FROM specs")] == ["Right"]
+    assert [row["model"] for row in db.execute("SELECT model FROM family_members")] == ["Kept"]
+
+
 def test_counts_every_table(db: sqlite3.Connection) -> None:
     assert counts(db) == {
         "categories": 0,
@@ -104,9 +184,34 @@ def test_counts_every_table(db: sqlite3.Connection) -> None:
         "product_categories": 0,
         "details": 0,
         "variants": 0,
+        "specs": 0,
+        "family_members": 0,
+        "family_specs": 0,
+        "resources": 0,
         "products_unlisted": 0,
         "details_outdated": 0,
+        "wikis_pending": 0,
     }
+
+
+def test_reading_a_wiki_is_recorded_even_when_it_offers_nothing(db: sqlite3.Connection) -> None:
+    """Otherwise `wiki --all` would return to the same empty page on every run."""
+    save_detail(db, DETAIL)
+    assert counts(db)["wikis_pending"] == 1
+
+    save_resources(db, URL, [])
+
+    assert counts(db)["wikis_pending"] == 0
+
+
+def test_saves_and_replaces_the_files_a_wiki_offers(db: sqlite3.Connection) -> None:
+    save_detail(db, DETAIL)
+    save_resources(db, URL, [Resource(kind="cad", url="https://f/x.zip", title="X 2D & 3D")])
+
+    save_resources(db, URL, [Resource(kind="demo", url="https://f/y.zip", title="Y Demo")])
+
+    rows = [(r["kind"], r["title"]) for r in db.execute("SELECT kind, title FROM resources")]
+    assert rows == [("demo", "Y Demo")]
 
 
 def test_the_product_page_price_range_overrides_the_listing(db: sqlite3.Connection) -> None:
