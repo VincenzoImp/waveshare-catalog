@@ -30,8 +30,10 @@ uvx --from git+https://github.com/VincenzoImp/waveshare-catalog waveshare-catalo
 Or keep it around:
 
 ```bash
-pipx install git+https://github.com/VincenzoImp/waveshare-catalog
+uv tool install git+https://github.com/VincenzoImp/waveshare-catalog
 ```
+
+`pipx install` works the same way if you prefer it.
 
 To work on it, clone the repository and run `uv sync`.
 
