@@ -19,19 +19,48 @@ $ waveshare-catalog query --name touch --price-max 40 --with-options
 8 products
 ```
 
-## Status
+## Install
 
-Working and complete for what it sets out to do, maintained casually. The snapshot is
-refreshed now and then rather than on a schedule, and the parsers read Waveshare's HTML, so
-they will break when the site changes: it has happened once already, when Waveshare replaced
-the Magento variant format with its own. When it happens, fixing the parser and running
-`reparse` costs minutes and no network, because every page is cached. Issues get read when
-there is time.
+Run it without installing anything:
 
-## Prebuilt snapshot
+```bash
+uvx --from git+https://github.com/VincenzoImp/waveshare-catalog waveshare-catalog --help
+```
 
-If you would rather not crawl, the [latest release](https://github.com/VincenzoImp/waveshare-catalog/releases/latest)
-carries a ready database, 2.9 MB compressed:
+Or keep it around:
+
+```bash
+pipx install git+https://github.com/VincenzoImp/waveshare-catalog
+```
+
+To work on it, clone the repository and run `uv sync`.
+
+## Use
+
+```bash
+# 1. register the whole catalogue and collect what the listings give away cheaply
+waveshare-catalog sync
+
+# 2. filter locally, as often as you want, with no further requests
+waveshare-catalog query --name touch --price-max 40 --with-options
+
+# 3. pull full pages for what survived the filter
+waveshare-catalog detail --name "touch lcd" --limit 20
+
+# ...or the whole catalogue, resuming wherever the last run stopped
+waveshare-catalog detail --all
+
+# 4. take it elsewhere
+waveshare-catalog export --format csv --price-max 60 > shortlist.csv
+```
+
+`stats` shows how much has been collected. `reparse` re-runs the parsers over pages already
+on disk, which costs no network and is how you pick up a parser fix after an upgrade.
+
+## Skip the crawl
+
+The [latest release](https://github.com/VincenzoImp/waveshare-catalog/releases/latest) carries
+a ready database, 2.9 MB compressed:
 
 ```bash
 curl -LO https://github.com/VincenzoImp/waveshare-catalog/releases/latest/download/waveshare-catalog-2026-08-29.db.gz
@@ -45,40 +74,12 @@ prices and availability drift; re-run `sync` and `detail --all` for current data
 product text in it belongs to Waveshare: it is bundled so you can query the catalogue, not
 as content to republish.
 
-## Install
+## How this catalogue is actually shaped
 
-```bash
-uv sync
-```
+Both of these were measured against the live site, and both decide how the tool works.
 
-## Use
-
-```bash
-# 1. register the whole catalogue and collect what the listings give away cheaply
-uv run waveshare-catalog sync
-
-# 2. filter locally, as often as you want, with no further requests
-uv run waveshare-catalog query --name touch --price-max 40 --with-options
-
-# 3. pull full pages for what survived the filter
-uv run waveshare-catalog detail --name "touch lcd" --limit 20
-
-# ...or the whole catalogue, resuming wherever the last run stopped
-uv run waveshare-catalog detail --all
-
-# 4. take it elsewhere
-uv run waveshare-catalog export --format csv --price-max 60 > shortlist.csv
-```
-
-`stats` shows how much has been collected. `reparse` re-runs the parsers over pages already
-on disk, which costs no network and is how you pick up a parser fix after an upgrade.
-
-## Two things worth knowing about this catalogue
-
-Both were measured against the live site, and both shape how the tool works.
-
-**About a fifth of the catalogue is in no category at all.** 465 of the 2,349 products are
-listed in `sitemap.xml`, have a live page and can be bought, yet appear under no category.
+**A fifth of the catalogue is in no category at all.** 465 of the 2,349 products are listed in
+`sitemap.xml`, have a live page and can be bought, yet appear under no category.
 `1.02inch-e-paper.htm` is one of them: a real 1.02inch e-Paper module at $5.99, absent from
 `/product/displays/e-paper.htm` and from every `epaper-N` subcategory. So `sync` registers
 every URL the sitemap names, and `detail` can reach them all. Without that, no amount of
@@ -95,7 +96,7 @@ crawling would ever find them.
 That is why the root listing is the default and `--with-categories` is opt-in: you turn it on
 when you want to know which category a product belongs to, not to find more products.
 
-## About the crawl delay
+## What a full crawl costs
 
 Waveshare's `robots.txt` asks for `Crawl-delay: 60` and `Request-rate: 1/60`, one request per
 minute. This tool reads that file and obeys it by default, single threaded. `--delay`
@@ -111,7 +112,7 @@ Product pages are around 300 KB and the site answers in about 2.1 s, so:
 
 `detail --all` only picks products whose page is missing, so a long run can be interrupted
 and resumed. Nothing is lost either way: every response is cached gzipped under `cache/`,
-keyed by URL.
+keyed by URL, and progress is committed as it goes.
 
 ## What gets stored
 
@@ -151,6 +152,15 @@ uv run mypy
 Parser tests run against real pages captured from the site and frozen under
 `tests/fixtures/`, so they catch a change in the site's markup instead of agreeing with a
 mock. Nothing in the suite touches the network.
+
+## Status
+
+Working and complete for what it sets out to do, maintained casually. The snapshot is
+refreshed now and then rather than on a schedule, and the parsers read Waveshare's HTML, so
+they will break when the site changes: it has happened once already, when Waveshare replaced
+the Magento variant format with its own. When it happens, fixing the parser and running
+`reparse` costs minutes and no network, because every page is cached. Issues get read when
+there is time.
 
 ## Licence
 

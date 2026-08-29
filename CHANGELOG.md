@@ -1,9 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
-- `--db` and `--cache` are accepted either before or after the subcommand, instead of only
-  before it.
+Everything here came out of running the tool over the whole catalogue rather than reading
+the code.
+
+- Products in no category now get their name, Part No and image from their own page. Before
+  this they came only from listings, so 465 products, a fifth of the catalogue, sat in the
+  database with no name at all.
+- A long crawl commits as it goes. Previously nothing was written until the command ended,
+  so an interruption after two hours left the database empty, even though the pages were
+  safely cached.
+- The HTTP client is closed when a command finishes, instead of leaving its connection pool
+  to the garbage collector.
+- Only a product's own images are stored. A page shows around 57 catalogue thumbnails and
+  all but a handful belong to related items, which was 18 MB of useless URLs across the
+  catalogue.
+- `--db` and `--cache` are accepted either before or after the subcommand.
 
 ## 0.1.0
 
