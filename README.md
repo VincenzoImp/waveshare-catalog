@@ -6,10 +6,11 @@ The [Waveshare](https://www.waveshare.com) catalogue as a SQLite file you can qu
 crawler that builds it.
 
 Waveshare sells around 2,350 products and its own search cannot answer the questions people
-actually have about them. You pick a board and only later find the identical one with a
-different microcontroller for four dollars less, or never learn that the thing you needed
-existed at all. This turns the catalogue into a table, so that "a touch display under $40
-that ships with a case and can take a battery" is a query rather than forty browser tabs.
+actually have about them. You buy `ESP32-S3-LCD-1.28` for $15.99 and later find
+`RP2350-LCD-1.28`, the same 1.28inch 240×240 round display on a different microcontroller,
+for $11.99 — or you never learn that the thing you needed existed at all. This turns the
+catalogue into a table, so that "a touch display under $40 that ships with a case and can
+take a battery" is a query rather than forty browser tabs.
 
 Waveshare prints, on each product page, a comparison matrix of that product's whole family.
 Nothing else in the catalogue links related products — categories certainly do not — so this
